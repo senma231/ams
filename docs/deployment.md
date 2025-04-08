@@ -1,0 +1,241 @@
+# 部署指南
+
+本文档提供了将资产管理系统部署到生产环境的详细步骤。
+
+## 目录
+
+1. [系统要求](#系统要求)
+2. [前端部署](#前端部署)
+3. [后端部署](#后端部署)
+4. [数据库设置](#数据库设置)
+5. [自动化部署脚本](#自动化部署脚本)
+6. [安全考虑](#安全考虑)
+7. [性能优化](#性能优化)
+8. [故障排除](#故障排除)
+
+## 系统要求
+
+### 最低配置
+- CPU: 双核处理器
+- 内存: 2GB RAM
+- 存储: 10GB 可用空间
+- 操作系统: Linux (推荐 Ubuntu 20.04+)、Windows Server 或 macOS
+
+### 软件要求
+- Node.js v14.0.0 或更高版本
+- npm v6.0.0 或更高版本
+- SQLite v3.0.0 或更高版本
+
+## 前端部署
+
+### 构建前端应用
+```bash
+# 进入前端目录
+cd frontend
+
+# 安装依赖
+npm install
+
+# 构建生产版本
+npm run build
+```
+
+构建完成后，`dist` 目录中将包含所有静态文件。
+
+### 部署选项
+
+#### 选项 1: Nginx (推荐)
+```bash
+# 安装 Nginx
+sudo apt update
+sudo apt install nginx
+
+# 配置 Nginx
+sudo nano /etc/nginx/sites-available/asset-management
+
+# 添加以下配置
+server {
+    listen 80;
+    server_name your-domain.com;
+    root /path/to/frontend/dist;
+    index index.html;
+    
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    location /api {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# 启用站点
+sudo ln -s /etc/nginx/sites-available/asset-management /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+#### 选项 2: Apache
+```bash
+# 安装 Apache
+sudo apt update
+sudo apt install apache2
+
+# 启用必要的模块
+sudo a2enmod proxy
+sudo a2enmod proxy_http
+sudo a2enmod rewrite
+
+# 配置 Apache
+sudo nano /etc/apache2/sites-available/asset-management.conf
+
+# 添加以下配置
+<VirtualHost *:80>
+    ServerName your-domain.com
+    DocumentRoot /path/to/frontend/dist
+    
+    <Directory /path/to/frontend/dist>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ProxyPass /api http://localhost:3000/api
+    ProxyPassReverse /api http://localhost:3000/api
+    
+    ErrorLog ${APACHE_LOG_DIR}/asset-management-error.log
+    CustomLog ${APACHE_LOG_DIR}/asset-management-access.log combined
+</VirtualHost>
+
+# 启用站点
+sudo a2ensite asset-management.conf
+sudo systemctl restart apache2
+```
+
+## 后端部署
+
+### 准备后端应用
+```bash
+# 进入后端目录
+cd backend
+
+# 安装依赖
+npm install --production
+
+# 创建必要的目录
+mkdir -p data logs
+```
+
+### 使用 PM2 管理后端进程
+```bash
+# 全局安装 PM2
+npm install -g pm2
+
+# 启动应用
+pm2 start src/app.js --name "asset-management-backend"
+
+# 设置开机自启
+pm2 startup
+pm2 save
+```
+
+## 数据库设置
+
+SQLite 数据库文件将在应用程序首次运行时自动创建在 `backend/data` 目录中。
+
+### 数据备份
+设置定期备份：
+```bash
+# 创建备份脚本
+cat > backup.sh << 'EOF'
+#!/bin/bash
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_DIR="/path/to/backups"
+DB_FILE="/path/to/backend/data/database.db"
+
+mkdir -p $BACKUP_DIR
+cp $DB_FILE "$BACKUP_DIR/database_$TIMESTAMP.db"
+
+# 保留最近 30 个备份
+ls -t $BACKUP_DIR/database_*.db | tail -n +31 | xargs rm -f
+EOF
+
+# 添加执行权限
+chmod +x backup.sh
+
+# 设置定时任务，每天凌晨 2 点执行备份
+(crontab -l 2>/dev/null; echo "0 2 * * * /path/to/backup.sh") | crontab -
+```
+
+## 自动化部署脚本
+
+请参考项目根目录中的 `deploy.sh` 脚本，它提供了一键部署解决方案。
+
+## 安全考虑
+
+1. **HTTPS 配置**
+   - 强烈建议使用 HTTPS 保护您的应用程序
+   - 可以使用 Let's Encrypt 获取免费的 SSL 证书
+
+2. **防火墙设置**
+   - 只开放必要的端口（80、443）
+   - 限制对 SSH 端口的访问
+
+3. **定期更新**
+   - 保持系统和依赖包的更新
+   - 监控安全公告
+
+## 性能优化
+
+1. **启用 Nginx 缓存**
+   ```nginx
+   location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+       expires 30d;
+       add_header Cache-Control "public, no-transform";
+   }
+   ```
+
+2. **压缩静态资源**
+   ```nginx
+   gzip on;
+   gzip_comp_level 5;
+   gzip_min_length 256;
+   gzip_proxied any;
+   gzip_vary on;
+   gzip_types
+     application/javascript
+     application/json
+     application/x-javascript
+     text/css
+     text/javascript
+     text/plain;
+   ```
+
+## 故障排除
+
+### 常见问题
+
+1. **无法连接到后端 API**
+   - 检查后端服务是否正在运行：`pm2 status`
+   - 检查防火墙设置：`sudo ufw status`
+   - 检查代理配置是否正确
+
+2. **数据库错误**
+   - 检查数据目录权限：`ls -la backend/data`
+   - 检查磁盘空间：`df -h`
+
+3. **前端加载缓慢**
+   - 检查网络连接
+   - 验证静态资源是否正确缓存
+   - 使用浏览器开发工具分析性能瓶颈
+
+### 日志位置
+- 前端（Nginx）：`/var/log/nginx/error.log`
+- 前端（Apache）：`/var/log/apache2/asset-management-error.log`
+- 后端：`backend/logs/combined.log` 和 `backend/logs/error.log`
+- PM2：`pm2 logs asset-management-backend`
