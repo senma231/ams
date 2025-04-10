@@ -22,8 +22,8 @@
 - 操作系统: Linux (推荐 Ubuntu 20.04+)、Windows Server 或 macOS
 
 ### 软件要求
-- Node.js v14.0.0 或更高版本
-- npm v6.0.0 或更高版本
+- Node.js v18.0.0 或更高版本
+- npm v8.0.0 或更高版本
 - SQLite v3.0.0 或更高版本
 
 ## 前端部署

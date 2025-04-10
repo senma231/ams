@@ -139,10 +139,10 @@ install_nodejs() {
         log_info "检测到 Node.js 版本: $NODE_VER"
 
         # 检查版本是否满足要求
-        if [ "$(printf '%s\n' "14.0.0" "$NODE_VER" | sort -V | head -n1)" = "14.0.0" ]; then
+        if [ "$(printf '%s\n' "18.0.0" "$NODE_VER" | sort -V | head -n1)" = "18.0.0" ]; then
             log_success "Node.js 版本满足要求"
         else
-            log_warning "Node.js 版本过低，需要 v14.0.0 或更高版本"
+            log_warning "Node.js 版本过低，需要 v18.0.0 或更高版本"
             install_nodejs_nvm
         fi
     else
@@ -168,12 +168,13 @@ install_nodejs_nvm() {
         [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     fi
 
-    # 安装 Node.js LTS 版本
-    log_info "安装 Node.js LTS 版本..."
-    nvm install --lts
+    # 安装 Node.js 18 版本
+    log_info "安装 Node.js 18 版本..."
+    nvm install 18
 
     # 设置默认 Node.js 版本
-    nvm alias default node
+    nvm alias default 18
+    nvm use 18
 
     # 验证安装
     NODE_VER=$(node -v)
