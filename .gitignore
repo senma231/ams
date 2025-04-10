@@ -54,3 +54,6 @@ temp/
 
 # Test files
 docs/github-upload.md
+
+# Utility scripts (not for repository)
+clean_caddy.sh

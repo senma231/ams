@@ -380,121 +380,115 @@ install_sqlite() {
     fi
 }
 
-# 安装 Caddy
-install_caddy() {
-    log_info "检查 Caddy..."
+# 检查并安装 Nginx
+check_nginx() {
+    log_info "检查 Nginx..."
 
-    if command -v caddy &> /dev/null; then
-        CADDY_VER=$(caddy version | head -n1)
-        log_info "检测到 Caddy 版本: $CADDY_VER"
+    if command -v nginx &> /dev/null; then
+        NGINX_VER=$(nginx -v 2>&1 | grep -o "nginx/[0-9.]*" | cut -d '/' -f 2)
+        log_info "检测到 Nginx 版本: $NGINX_VER"
 
         # 检查是否需要更新
         if [ "$QUICK_DEPLOY" = true ]; then
-            log_info "快速部署模式: 自动更新 Caddy"
+            log_info "快速部署模式: 自动更新 Nginx"
 
             # 根据不同的操作系统使用不同的更新方法
             if [ "$PKG_MANAGER" = "apt" ]; then
                 # Debian/Ubuntu
                 apt update
-                apt install -y caddy
+                apt install -y nginx
             elif [ "$PKG_MANAGER" = "yum" ]; then
                 # CentOS/RHEL
-                yum update -y caddy
+                yum update -y nginx
             else
                 # 通用方法
-                log_warning "无法自动更新 Caddy，请手动更新"
+                log_warning "无法自动更新 Nginx，请手动更新"
             fi
 
-            CADDY_VER=$(caddy version | head -n1)
-            log_success "Caddy 更新到版本 $CADDY_VER"
+            NGINX_VER=$(nginx -v 2>&1 | grep -o "nginx/[0-9.]*" | cut -d '/' -f 2)
+            log_success "Nginx 更新到版本 $NGINX_VER"
         else
-            read -p "是否更新 Caddy 到最新版本? (y/n): " confirm
+            read -p "是否更新 Nginx 到最新版本? (y/n): " confirm
             if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                log_info "更新 Caddy..."
+                log_info "更新 Nginx..."
 
                 # 根据不同的操作系统使用不同的更新方法
                 if [ "$PKG_MANAGER" = "apt" ]; then
                     # Debian/Ubuntu
                     apt update
-                    apt install -y caddy
+                    apt install -y nginx
                 elif [ "$PKG_MANAGER" = "yum" ]; then
                     # CentOS/RHEL
-                    yum update -y caddy
+                    yum update -y nginx
                 else
                     # 通用方法
-                    log_warning "无法自动更新 Caddy，请手动更新"
+                    log_warning "无法自动更新 Nginx，请手动更新"
                 fi
 
-                CADDY_VER=$(caddy version | head -n1)
-                log_success "Caddy 更新到版本 $CADDY_VER"
+                NGINX_VER=$(nginx -v 2>&1 | grep -o "nginx/[0-9.]*" | cut -d '/' -f 2)
+                log_success "Nginx 更新到版本 $NGINX_VER"
             else
-                log_info "继续使用当前 Caddy 版本"
+                log_info "继续使用当前 Nginx 版本"
             fi
         fi
     else
-        log_info "Caddy 未安装，需要安装"
+        log_info "Nginx 未安装，需要安装"
         if [ "$QUICK_DEPLOY" = true ]; then
-            log_info "快速部署模式: 自动安装 Caddy"
+            log_info "快速部署模式: 自动安装 Nginx"
 
             # 根据不同的操作系统使用不同的安装方法
             if [ "$PKG_MANAGER" = "apt" ]; then
                 # Debian/Ubuntu
-                log_info "使用 apt 安装 Caddy..."
-                apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+                log_info "使用 apt 安装 Nginx..."
                 apt update
-                apt install -y caddy
+                apt install -y nginx
             elif [ "$PKG_MANAGER" = "yum" ]; then
                 # CentOS/RHEL
-                log_info "使用 yum 安装 Caddy..."
-                yum install -y yum-plugin-copr
-                yum copr enable -y @caddy/caddy
-                yum install -y caddy
+                log_info "使用 yum 安装 Nginx..."
+                yum install -y epel-release
+                yum install -y nginx
             else
                 # 通用方法
-                log_info "使用通用方法安装 Caddy..."
-                curl -fsSL https://getcaddy.com | bash -s personal
+                log_info "使用通用方法安装 Nginx..."
+                log_error "无法自动安装 Nginx，请手动安装"
+                exit 1
             fi
 
             if [ $? -ne 0 ]; then
-                log_error "安装 Caddy 失败"
+                log_error "安装 Nginx 失败"
                 exit 1
             fi
-            log_success "Caddy 安装完成"
+            log_success "Nginx 安装完成"
         else
-            read -p "是否安装 Caddy? (y/n): " confirm
+            read -p "是否安装 Nginx? (y/n): " confirm
             if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                log_info "安装 Caddy..."
+                log_info "安装 Nginx..."
 
                 # 根据不同的操作系统使用不同的安装方法
                 if [ "$PKG_MANAGER" = "apt" ]; then
                     # Debian/Ubuntu
-                    log_info "使用 apt 安装 Caddy..."
-                    apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-                    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-                    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+                    log_info "使用 apt 安装 Nginx..."
                     apt update
-                    apt install -y caddy
+                    apt install -y nginx
                 elif [ "$PKG_MANAGER" = "yum" ]; then
                     # CentOS/RHEL
-                    log_info "使用 yum 安装 Caddy..."
-                    yum install -y yum-plugin-copr
-                    yum copr enable -y @caddy/caddy
-                    yum install -y caddy
+                    log_info "使用 yum 安装 Nginx..."
+                    yum install -y epel-release
+                    yum install -y nginx
                 else
                     # 通用方法
-                    log_info "使用通用方法安装 Caddy..."
-                    curl -fsSL https://getcaddy.com | bash -s personal
+                    log_info "使用通用方法安装 Nginx..."
+                    log_error "无法自动安装 Nginx，请手动安装"
+                    exit 1
                 fi
 
                 if [ $? -ne 0 ]; then
-                    log_error "安装 Caddy 失败"
+                    log_error "安装 Nginx 失败"
                     exit 1
                 fi
-                log_success "Caddy 安装完成"
+                log_success "Nginx 安装完成"
             else
-                log_error "Caddy 是必需的组件，无法继续部署"
+                log_error "Nginx 是必需的组件，无法继续部署"
                 exit 1
             fi
         fi
@@ -567,26 +561,22 @@ deploy_frontend() {
         exit 1
     fi
 
-    # 检查是否已经有其他项目使用 Caddy
-    EXISTING_CADDY_CONFIG=false
-    if [ -f "/etc/caddy/Caddyfile" ] && [ -s "/etc/caddy/Caddyfile" ]; then
-        log_info "检测到现有 Caddy 配置"
-        EXISTING_CADDY_CONFIG=true
+    # 检查是否已经有其他项目使用 Nginx
+    EXISTING_NGINX_CONFIG=false
+    if [ -f "/etc/nginx/sites-enabled/default" ] || [ -d "/etc/nginx/conf.d" ] && [ "$(ls -A /etc/nginx/conf.d 2>/dev/null)" ]; then
+        log_info "检测到现有 Nginx 配置"
+        EXISTING_NGINX_CONFIG=true
 
-        if [ "$QUICK_DEPLOY" != true ]; then
-            echo ""
-            log_warning "检测到现有 Caddy 配置，可能有其他项目正在使用 Caddy"
-            echo "----------------------------------------"
-            echo "选项 1: 覆盖现有配置 (可能影响其他项目)"
-            echo "选项 2: 将资产管理系统添加到现有配置中"
-            echo "----------------------------------------"
-            read -p "请选择 (1/2): " caddy_option
+        # 即使在快速部署模式下，也要询问域名配置
+        echo ""
+        log_warning "检测到现有 Nginx 配置，可能有其他项目正在使用 Nginx"
+        echo "----------------------------------------"
+        echo "选项 1: 覆盖现有配置 (可能影响其他项目)"
+        echo "选项 2: 将资产管理系统添加为新站点"
+        echo "----------------------------------------"
+        read -p "请选择 (1/2): " nginx_option
 
-            if [ "$caddy_option" = "2" ]; then
-                # 备份现有配置
-                cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +"%Y%m%d%H%M%S")
-                log_info "已备份现有 Caddy 配置"
-
+            if [ "$nginx_option" = "2" ]; then
                 # 询问是否使用子域名或路径
                 echo ""
                 log_info "添加方式选择"
@@ -600,76 +590,98 @@ deploy_frontend() {
                     read -p "请输入子域名: " SUBDOMAIN
                     DOMAIN_NAME=$SUBDOMAIN
 
-                    # 添加子域名配置
-                    cat >> /etc/caddy/Caddyfile << EOF
-
+                    # 创建新的站点配置文件
+                    cat > /etc/nginx/conf.d/ams.conf << EOF
 # 资产管理系统 - 子域名: $SUBDOMAIN
-$SUBDOMAIN {
-    # 允许所有访问
-    header Access-Control-Allow-Origin *
+server {
+    listen 80;
+    server_name $SUBDOMAIN;
 
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    root $(pwd)/dist;
+    index index.html;
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
-    file_server browse
-    encode gzip
+
+    # 静态文件
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
                     log_success "已添加子域名配置: $SUBDOMAIN"
 
                 elif [ "$add_option" = "2" ]; then
-                    read -p "请输入路径前缀 (例如: /ams): " PATH_PREFIX
+                    read -p "请输入域名: " DOMAIN
+                    read -p "请输入路径前缀 (例如: ams): " PATH_PREFIX
+                    DOMAIN_NAME="$DOMAIN/$PATH_PREFIX"
 
-                    # 添加路径配置
-                    cat >> /etc/caddy/Caddyfile << EOF
+                    # 创建新的站点配置文件
+                    cat > /etc/nginx/conf.d/ams.conf << EOF
+# 资产管理系统 - 路径前缀: $DOMAIN/$PATH_PREFIX
+server {
+    listen 80;
+    server_name $DOMAIN;
 
-# 资产管理系统 - 路径: $PATH_PREFIX
-handle $PATH_PREFIX/* {
-    uri strip_prefix $PATH_PREFIX
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    # 静态文件
+    location /$PATH_PREFIX/ {
+        alias $(pwd)/dist/;
+        try_files \$uri \$uri/ /$PATH_PREFIX/index.html;
     }
-    file_server browse
-    encode gzip
+
+    # API 反向代理
+    location /$PATH_PREFIX/api/ {
+        rewrite ^/$PATH_PREFIX/api/(.*) /\$1 break;
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
                     log_success "已添加路径配置: $PATH_PREFIX"
 
                 else
                     log_error "无效选项，将覆盖现有配置"
-                    EXISTING_CADDY_CONFIG=false
+                    EXISTING_NGINX_CONFIG=false
                 fi
             else
-                log_warning "将覆盖现有 Caddy 配置"
-                EXISTING_CADDY_CONFIG=false
+                log_warning "将覆盖现有 Nginx 配置"
+                EXISTING_NGINX_CONFIG=false
             fi
             echo ""
-        else
-            # 快速部署模式下默认覆盖
-            log_warning "快速部署模式: 将覆盖现有 Caddy 配置"
-            EXISTING_CADDY_CONFIG=false
-        fi
     fi
 
-    # 配置 Caddy
-    log_info "配置 Caddy..."
+    # 配置 Nginx
+    log_info "配置 Nginx..."
 
     # 获取当前目录的绝对路径
     FRONTEND_DIST=$(pwd)/dist
 
-    # 创建 Caddy 配置目录
-    if [ ! -d "/etc/caddy" ]; then
-        log_info "创建 Caddy 配置目录..."
-        mkdir -p /etc/caddy
+    # 创建 Nginx 配置目录
+    if [ ! -d "/etc/nginx/conf.d" ]; then
+        log_info "创建 Nginx 配置目录..."
+        mkdir -p /etc/nginx/conf.d
     fi
 
     # 如果已经添加到现有配置，则跳过创建新配置
-    if [ "$EXISTING_CADDY_CONFIG" = true ]; then
-        log_info "使用现有 Caddy 配置并添加资产管理系统"
+    if [ "$EXISTING_NGINX_CONFIG" = true ]; then
+        log_info "使用现有 Nginx 配置并添加资产管理系统"
     else
         # 检查端口 80 是否被占用
         log_info "检查端口 80 是否被占用..."
@@ -678,21 +690,21 @@ EOF
         if [ ! -z "$PORT_80_PID" ]; then
             log_warning "端口 80 已被进程 ID $PORT_80_PID 占用"
 
-            # 检查是否是 Nginx
-            if systemctl is-active --quiet nginx; then
-                log_warning "Nginx 正在运行并占用端口 80"
+            # 检查是否是其他 Web 服务器
+            if systemctl is-active --quiet caddy; then
+                log_warning "Caddy 正在运行并占用端口 80"
 
                 if [ "$QUICK_DEPLOY" = true ]; then
-                    log_info "快速部署模式: 自动停止 Nginx"
-                    systemctl stop nginx
-                    log_success "Nginx 已停止"
+                    log_info "快速部署模式: 自动停止 Caddy"
+                    systemctl stop caddy
+                    log_success "Caddy 已停止"
                 else
-                    read -p "是否停止 Nginx 以释放端口 80? (y/n): " confirm
+                    read -p "是否停止 Caddy 以释放端口 80? (y/n): " confirm
                     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                        systemctl stop nginx
-                        log_success "Nginx 已停止"
+                        systemctl stop caddy
+                        log_success "Caddy 已停止"
                     else
-                        log_warning "继续部署，但 Caddy 可能无法启动"
+                        log_warning "继续部署，但 Nginx 可能无法启动"
                     fi
                 fi
             else
@@ -722,138 +734,222 @@ EOF
 
         # 询问是否配置域名
         DOMAIN_NAME=""
-        if [ "$QUICK_DEPLOY" != true ]; then
-            echo ""
-            log_info "域名配置"
-            echo "----------------------------------------"
-            echo "您可以为资产管理系统配置域名，这将启用 HTTPS"
-            echo "如果不配置域名，将使用服务器 IP 地址访问系统"
-            echo "----------------------------------------"
-            read -p "是否配置域名? (y/n): " confirm
-            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
-                log_info "已设置域名: $DOMAIN_NAME"
-            else
-                log_info "不使用域名，将使用 IP 地址访问"
-            fi
-            echo ""
+        # 即使在快速部署模式下，也要询问域名配置
+        echo ""
+        log_info "域名配置"
+        echo "----------------------------------------"
+        echo "您可以为资产管理系统配置域名"
+        echo "如果不配置域名，将使用服务器 IP 地址访问系统"
+        echo "----------------------------------------"
+        read -p "是否配置域名? (y/n): " confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
+            log_info "已设置域名: $DOMAIN_NAME"
+        else
+            log_info "不使用域名，将使用 IP 地址访问"
         fi
+        echo ""
 
-        # 创建 Caddy 配置文件
-        log_info "创建 Caddy 配置文件..."
+        # 创建 Nginx 配置文件
+        log_info "创建 Nginx 配置文件..."
         if [ -z "$DOMAIN_NAME" ]; then
             # 使用 IP 配置
-            cat > /etc/caddy/Caddyfile << EOF
-:80 {
-    # 允许所有访问
-    header Access-Control-Allow-Origin *
+            cat > /etc/nginx/sites-available/default << EOF
+# 资产管理系统
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
 
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    root $FRONTEND_DIST;
+    index index.html;
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
-    file_server browse
-    encode gzip
+
+    # 静态文件
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
         else
-            # 使用域名配置 (自动 HTTPS)
-            cat > /etc/caddy/Caddyfile << EOF
-$DOMAIN_NAME {
-    # 允许所有访问
-    header Access-Control-Allow-Origin *
+            # 使用域名配置
+            cat > /etc/nginx/sites-available/default << EOF
+# 资产管理系统
+server {
+    listen 80;
+    listen [::]:80;
 
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    server_name $DOMAIN_NAME;
+
+    root $FRONTEND_DIST;
+    index index.html;
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
-    file_server browse
-    encode gzip
+
+    # 静态文件
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
         fi
 
-        # 重启 Caddy
-        log_info "重启 Caddy..."
-        if systemctl is-active --quiet caddy; then
-            systemctl reload caddy
-            if [ $? -ne 0 ]; then
-                log_info "重新加载失败，尝试重启 Caddy..."
-                systemctl restart caddy
-            fi
-        else
-            systemctl start caddy
+        # 确保符号链接存在
+        if [ ! -f "/etc/nginx/sites-enabled/default" ]; then
+            mkdir -p /etc/nginx/sites-enabled
+            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
         fi
 
+        # 修改 Nginx 主配置文件，包含 sites-enabled 目录
+        if ! grep -q "include /etc/nginx/sites-enabled/\*" /etc/nginx/nginx.conf; then
+            # 备份原始配置
+            cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.$(date +"%Y%m%d%H%M%S")
+
+            # 在 http 块的结尾前添加 include 指令
+            sed -i '/http {/,/}/{s/}/    include \/etc\/nginx\/sites-enabled\/\*;\n}/}' /etc/nginx/nginx.conf
+        fi
+
+        # 检查 Nginx 配置是否有语法错误
+        log_info "检查 Nginx 配置语法..."
+        nginx -t
         if [ $? -ne 0 ]; then
-            log_error "启动 Caddy 失败"
+            log_error "Nginx 配置有语法错误，请检查配置文件"
+            exit 1
+        fi
+
+        # 重启 Nginx 服务
+        log_info "重启 Nginx 服务..."
+        systemctl restart nginx
+        if [ $? -ne 0 ]; then
+            log_error "启动 Nginx 失败"
             log_warning "可能是端口 80 仍然被占用。尝试使用其他端口..."
 
             # 尝试使用其他端口
             log_info "尝试使用端口 8080..."
 
-            if [ "$EXISTING_CADDY_CONFIG" = true ]; then
+            if [ "$EXISTING_NGINX_CONFIG" = true ]; then
                 # 如果使用现有配置，则不修改配置文件
-                log_warning "使用现有配置，无法自动切换端口。请手动修改 Caddy 配置。"
+                log_warning "使用现有配置，无法自动切换端口。请手动修改 Nginx 配置。"
             else
                 # 修改配置文件使用端口 8080
                 if [ -z "$DOMAIN_NAME" ]; then
                     # 使用 IP 配置
-                    cat > /etc/caddy/Caddyfile << EOF
-:8080 {
-    # 允许所有访问
-    header Access-Control-Allow-Origin *
+                    cat > /etc/nginx/sites-available/default << EOF
+# 资产管理系统
+server {
+    listen 8080 default_server;
+    listen [::]:8080 default_server;
 
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    root $FRONTEND_DIST;
+    index index.html;
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
-    file_server browse
-    encode gzip
+
+    # 静态文件
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
                 else
                     # 使用域名配置，但在端口 8080 上
-                    cat > /etc/caddy/Caddyfile << EOF
-$DOMAIN_NAME:8080 {
-    # 允许所有访问
-    header Access-Control-Allow-Origin *
+                    cat > /etc/nginx/sites-available/default << EOF
+# 资产管理系统
+server {
+    listen 8080;
+    listen [::]:8080;
 
-    root * $FRONTEND_DIST
-    route {
-        reverse_proxy /api/* localhost:3000
-        try_files {path} {path}/ /index.html
+    server_name $DOMAIN_NAME;
+
+    root $FRONTEND_DIST;
+    index index.html;
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://localhost:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
-    file_server browse
-    encode gzip
+
+    # 静态文件
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # 允许跨域请求
+    add_header Access-Control-Allow-Origin *;
 }
 EOF
                 fi
 
-                systemctl restart caddy
+                # 检查配置是否有语法错误
+                nginx -t
                 if [ $? -ne 0 ]; then
-                    log_error "即使使用端口 8080 也无法启动 Caddy"
+                    log_error "Nginx 配置有语法错误，请检查配置文件"
                     log_warning "继续部署过程，但前端可能无法访问"
                 else
-                    log_success "Caddy 已在端口 8080 上启动"
-                    log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+                    systemctl restart nginx
+                    if [ $? -ne 0 ]; then
+                        log_error "即使使用端口 8080 也无法启动 Nginx"
+                        log_warning "继续部署过程，但前端可能无法访问"
+                    else
+                        log_success "Nginx 已在端口 8080 上启动"
+                        log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+                    fi
                 fi
             fi
         fi
 
         # 设置正确的文件权限
         log_info "设置文件权限..."
-        chown -R caddy:caddy $FRONTEND_DIST
+        if getent group www-data &>/dev/null; then
+            chown -R www-data:www-data $FRONTEND_DIST
+        else
+            chown -R nginx:nginx $FRONTEND_DIST 2>/dev/null || true
+        fi
         chmod -R 755 $FRONTEND_DIST
 
-        # 检查 Caddy 是否运行
-        if ! systemctl is-active --quiet caddy; then
-            log_error "Caddy 服务未运行"
-            log_info "尝试手动启动 Caddy..."
-            caddy run --config /etc/caddy/Caddyfile &
+        # 检查 Nginx 是否运行
+        if ! systemctl is-active --quiet nginx; then
+            log_error "Nginx 服务未运行"
+            log_info "尝试手动启动 Nginx..."
+            nginx
         fi
     fi
 
@@ -923,28 +1019,28 @@ show_deployment_info() {
         log_info "检测到公网 IP: $SERVER_IP"
     fi
 
-    # 检查 Caddy 使用的端口
-    CADDY_PORT=80
-    if grep -q ":8080" /etc/caddy/Caddyfile; then
-        CADDY_PORT=8080
+    # 检查 Nginx 使用的端口
+    NGINX_PORT=80
+    if grep -q "listen 8080" /etc/nginx/sites-enabled/default 2>/dev/null || grep -q "listen 8080" /etc/nginx/conf.d/ams.conf 2>/dev/null; then
+        NGINX_PORT=8080
     fi
 
     # 检查是否配置了域名
-    if [ -f "/etc/caddy/Caddyfile" ]; then
+    DOMAIN_CONFIG=""
+    if [ -f "/etc/nginx/sites-enabled/default" ]; then
         # 使用更精确的方式检测域名配置
-        DOMAIN_CONFIG=$(grep -v "^[:space:]*#" /etc/caddy/Caddyfile | grep -v "^:" | grep "{" | head -n 1 | awk '{print $1}')
+        DOMAIN_CONFIG=$(grep -v "^[:space:]*#" /etc/nginx/sites-enabled/default | grep "server_name" | head -n 1 | awk '{print $2}' | tr -d ';')
+    elif [ -f "/etc/nginx/conf.d/ams.conf" ]; then
+        DOMAIN_CONFIG=$(grep -v "^[:space:]*#" /etc/nginx/conf.d/ams.conf | grep "server_name" | head -n 1 | awk '{print $2}' | tr -d ';')
+    fi
 
-        if [ ! -z "$DOMAIN_CONFIG" ] && [ "$DOMAIN_CONFIG" != "{" ]; then
-            log_info "检测到域名配置: $DOMAIN_CONFIG"
-            ACCESS_URL="https://$DOMAIN_CONFIG"
-            API_URL="https://$DOMAIN_CONFIG/api"
-        else
-            ACCESS_URL="http://$SERVER_IP:$CADDY_PORT"
-            API_URL="http://$SERVER_IP:$CADDY_PORT/api"
-        fi
+    if [ ! -z "$DOMAIN_CONFIG" ] && [ "$DOMAIN_CONFIG" != "_" ] && [ "$DOMAIN_CONFIG" != "localhost" ]; then
+        log_info "检测到域名配置: $DOMAIN_CONFIG"
+        ACCESS_URL="http://$DOMAIN_CONFIG"
+        API_URL="http://$DOMAIN_CONFIG/api"
     else
-        ACCESS_URL="http://$SERVER_IP:$CADDY_PORT"
-        API_URL="http://$SERVER_IP:$CADDY_PORT/api"
+        ACCESS_URL="http://$SERVER_IP:$NGINX_PORT"
+        API_URL="http://$SERVER_IP:$NGINX_PORT/api"
     fi
 
     log_info "部署信息:"
@@ -1079,8 +1175,8 @@ main() {
     # 安装 SQLite
     install_sqlite
 
-    # 安装 Caddy
-    install_caddy
+    # 安装 Nginx
+    check_nginx
 
     # 部署后端
     deploy_backend
