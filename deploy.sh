@@ -115,7 +115,7 @@ update_system() {
 install_basic_deps() {
     log_info "安装基本依赖..."
 
-    DEPS="curl wget git build-essential"
+    DEPS="curl wget git build-essential lsof"
 
     for dep in $DEPS; do
         if ! command -v $dep &> /dev/null; then
@@ -579,6 +579,55 @@ deploy_frontend() {
         mkdir -p /etc/caddy
     fi
 
+    # 检查端口 80 是否被占用
+    log_info "检查端口 80 是否被占用..."
+    PORT_80_PID=$(lsof -t -i:80 2>/dev/null)
+
+    if [ ! -z "$PORT_80_PID" ]; then
+        log_warning "端口 80 已被进程 ID $PORT_80_PID 占用"
+
+        # 检查是否是 Nginx
+        if systemctl is-active --quiet nginx; then
+            log_warning "Nginx 正在运行并占用端口 80"
+
+            if [ "$QUICK_DEPLOY" = true ]; then
+                log_info "快速部署模式: 自动停止 Nginx"
+                systemctl stop nginx
+                log_success "Nginx 已停止"
+            else
+                read -p "是否停止 Nginx 以释放端口 80? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    systemctl stop nginx
+                    log_success "Nginx 已停止"
+                else
+                    log_warning "继续部署，但 Caddy 可能无法启动"
+                fi
+            fi
+        else
+            # 其他进程占用端口 80
+            PROCESS_NAME=$(ps -p $PORT_80_PID -o comm=)
+            log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 正在占用端口 80"
+
+            if [ "$QUICK_DEPLOY" = true ]; then
+                log_info "快速部署模式: 尝试终止占用端口 80 的进程"
+                kill $PORT_80_PID
+                sleep 2
+                log_info "已尝试终止进程"
+            else
+                read -p "是否终止该进程以释放端口 80? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    kill $PORT_80_PID
+                    sleep 2
+                    log_info "已尝试终止进程"
+                else
+                    log_warning "继续部署，但 Caddy 可能无法启动"
+                fi
+            fi
+        fi
+    else
+        log_success "端口 80 可用"
+    fi
+
     # 创建 Caddy 配置文件
     log_info "创建 Caddy 配置文件..."
     cat > /etc/caddy/Caddyfile << EOF
@@ -607,7 +656,30 @@ EOF
 
     if [ $? -ne 0 ]; then
         log_error "启动 Caddy 失败"
-        exit 1
+        log_warning "可能是端口 80 仍然被占用。尝试使用其他端口..."
+
+        # 尝试使用其他端口
+        log_info "尝试使用端口 8080..."
+        cat > /etc/caddy/Caddyfile << EOF
+:8080 {
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server
+    encode gzip
+}
+EOF
+
+        systemctl restart caddy
+        if [ $? -ne 0 ]; then
+            log_error "即使使用端口 8080 也无法启动 Caddy"
+            log_warning "继续部署过程，但前端可能无法访问"
+        else
+            log_success "Caddy 已在端口 8080 上启动"
+            log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+        fi
     fi
 
     # 检查 Caddy 是否运行
@@ -673,10 +745,16 @@ show_deployment_info() {
         SERVER_IP="localhost"
     fi
 
+    # 检查 Caddy 使用的端口
+    CADDY_PORT=80
+    if grep -q ":8080" /etc/caddy/Caddyfile; then
+        CADDY_PORT=8080
+    fi
+
     log_info "部署信息:"
     echo "========================================"
-    echo "前端 URL: http://$SERVER_IP"
-    echo "后端 API: http://$SERVER_IP/api"
+    echo "前端 URL: http://$SERVER_IP:$CADDY_PORT"
+    echo "后端 API: http://$SERVER_IP:$CADDY_PORT/api"
     echo "后端进程: pm2 status"
     echo "日志位置: $PROJECT_NAME/backend/logs/"
     echo "数据库位置: $PROJECT_NAME/backend/data/database.db"

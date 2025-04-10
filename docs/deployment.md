@@ -196,7 +196,8 @@ sudo bash deploy.sh --quick
    - 从 GitHub 拉取项目代码
    - 安装前端和后端依赖
    - 构建前端应用
-   - 配置并启动 Caddy 服务
+   - 检查并处理端口冲突（如端口 80 被占用）
+   - 配置并启动 Caddy 服务（如果端口 80 被占用，会切换到端口 8080）
    - 使用 PM2 启动后端服务
 
 4. **设置备份**
@@ -283,11 +284,17 @@ sudo bash deploy.sh --quick
    - 检查防火墙设置：`sudo ufw status`
    - 检查代理配置是否正确
 
-2. **数据库错误**
+2. **Caddy 启动失败**
+   - 检查端口 80 是否被占用：`sudo lsof -i:80`
+   - 如果端口被 Nginx 占用，可以停止 Nginx：`sudo systemctl stop nginx`
+   - 如果端口被其他进程占用，可以终止该进程或修改 Caddy 配置使用其他端口
+   - 检查 Caddy 日志：`journalctl -u caddy.service`
+
+3. **数据库错误**
    - 检查数据目录权限：`ls -la backend/data`
    - 检查磁盘空间：`df -h`
 
-3. **前端加载缓慢**
+4. **前端加载缓慢**
    - 检查网络连接
    - 验证静态资源是否正确缓存
    - 使用浏览器开发工具分析性能瓶颈
