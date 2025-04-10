@@ -1,10 +1,14 @@
 #!/bin/bash
 
 # 资产管理系统部署脚本
-# 此脚本会自动检查依赖和组件，安装缺失的组件，并处理版本兼容性问题
+# 此脚本会从 GitHub 拉取项目，自动检查依赖和组件，安装缺失的组件，并处理版本兼容性问题
 
 # 设置错误处理
 set -e
+
+# GitHub 仓库信息
+GITHUB_REPO="https://github.com/senma231/ams.git"
+PROJECT_NAME="ams"
 
 # 创建日志文件
 LOG_FILE="deploy_$(date +"%Y%m%d_%H%M%S").log"
@@ -236,21 +240,42 @@ install_sqlite() {
     fi
 }
 
-# 检查并安装 Nginx
-install_nginx() {
-    log_info "检查 Nginx..."
+# 安装 Caddy
+install_caddy() {
+    log_info "检查 Caddy..."
 
-    if command -v nginx &> /dev/null; then
-        NGINX_VER=$(nginx -v 2>&1 | awk -F/ '{print $2}')
-        log_info "检测到 Nginx 版本: $NGINX_VER"
+    if command -v caddy &> /dev/null; then
+        CADDY_VER=$(caddy version | head -n1)
+        log_info "检测到 Caddy 版本: $CADDY_VER"
     else
-        log_info "安装 Nginx..."
-        $INSTALL_CMD nginx
+        log_info "安装 Caddy..."
+
+        # 根据不同的操作系统使用不同的安装方法
+        if [ "$PKG_MANAGER" = "apt" ]; then
+            # Debian/Ubuntu
+            log_info "使用 apt 安装 Caddy..."
+            apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+            apt update
+            apt install -y caddy
+        elif [ "$PKG_MANAGER" = "yum" ]; then
+            # CentOS/RHEL
+            log_info "使用 yum 安装 Caddy..."
+            yum install -y yum-plugin-copr
+            yum copr enable -y @caddy/caddy
+            yum install -y caddy
+        else
+            # 通用方法
+            log_info "使用通用方法安装 Caddy..."
+            curl -fsSL https://getcaddy.com | bash -s personal
+        fi
+
         if [ $? -ne 0 ]; then
-            log_error "安装 Nginx 失败"
+            log_error "安装 Caddy 失败"
             exit 1
         fi
-        log_success "Nginx 安装完成"
+        log_success "Caddy 安装完成"
     fi
 }
 
@@ -271,6 +296,13 @@ deploy_backend() {
 
     # 创建必要的目录
     mkdir -p data logs
+
+    # 检查是否已经有运行的实例
+    if pm2 list | grep -q "asset-management-backend"; then
+        log_info "停止现有的后端实例..."
+        pm2 stop asset-management-backend
+        pm2 delete asset-management-backend
+    fi
 
     # 使用 PM2 启动应用
     log_info "启动后端应用..."
@@ -313,70 +345,54 @@ deploy_frontend() {
         exit 1
     fi
 
-    # 配置 Nginx
-    log_info "配置 Nginx..."
+    # 配置 Caddy
+    log_info "配置 Caddy..."
 
     # 获取当前目录的绝对路径
     FRONTEND_DIST=$(pwd)/dist
 
-    # 创建 Nginx 配置文件
-    cat > /etc/nginx/sites-available/asset-management << EOF
-server {
-    listen 80;
-    server_name localhost;
-    root $FRONTEND_DIST;
-    index index.html;
+    # 创建 Caddy 配置目录
+    if [ ! -d "/etc/caddy" ]; then
+        log_info "创建 Caddy 配置目录..."
+        mkdir -p /etc/caddy
+    fi
 
-    location / {
-        try_files \$uri \$uri/ /index.html;
+    # 创建 Caddy 配置文件
+    log_info "创建 Caddy 配置文件..."
+    cat > /etc/caddy/Caddyfile << EOF
+:80 {
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
     }
-
-    location /api {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-    }
-
-    # 静态资源缓存
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
-        expires 30d;
-        add_header Cache-Control "public, no-transform";
-    }
-
-    # 启用 gzip 压缩
-    gzip on;
-    gzip_comp_level 5;
-    gzip_min_length 256;
-    gzip_proxied any;
-    gzip_vary on;
-    gzip_types
-      application/javascript
-      application/json
-      application/x-javascript
-      text/css
-      text/javascript
-      text/plain;
+    file_server
+    encode gzip
 }
 EOF
 
-    # 启用站点
-    ln -sf /etc/nginx/sites-available/asset-management /etc/nginx/sites-enabled/
+    # 重启 Caddy
+    log_info "重启 Caddy..."
+    if systemctl is-active --quiet caddy; then
+        systemctl reload caddy
+        if [ $? -ne 0 ]; then
+            log_info "重新加载失败，尝试重启 Caddy..."
+            systemctl restart caddy
+        fi
+    else
+        systemctl start caddy
+    fi
 
-    # 测试 Nginx 配置
-    nginx -t
     if [ $? -ne 0 ]; then
-        log_error "Nginx 配置测试失败"
+        log_error "启动 Caddy 失败"
         exit 1
     fi
 
-    # 重启 Nginx
-    systemctl restart nginx
-    if [ $? -ne 0 ]; then
-        log_error "重启 Nginx 失败"
-        exit 1
+    # 检查 Caddy 是否运行
+    if ! systemctl is-active --quiet caddy; then
+        log_error "Caddy 服务未运行"
+        log_info "尝试手动启动 Caddy..."
+        caddy run --config /etc/caddy/Caddyfile &
     fi
 
     log_success "前端部署完成"
@@ -429,16 +445,29 @@ EOF
 
 # 显示部署信息
 show_deployment_info() {
+    # 获取服务器 IP 地址
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$SERVER_IP" ]; then
+        SERVER_IP="localhost"
+    fi
+
     log_info "部署信息:"
     echo "========================================"
-    echo "前端 URL: http://localhost"
-    echo "后端 API: http://localhost/api"
+    echo "前端 URL: http://$SERVER_IP"
+    echo "后端 API: http://$SERVER_IP/api"
     echo "后端进程: pm2 status"
-    echo "日志位置: backend/logs/"
-    echo "数据库位置: backend/data/database.db"
-    echo "备份脚本: ./backup.sh"
+    echo "日志位置: $PROJECT_NAME/backend/logs/"
+    echo "数据库位置: $PROJECT_NAME/backend/data/database.db"
+    echo "备份脚本: $PROJECT_NAME/backup.sh"
     echo "========================================"
     log_success "资产管理系统部署完成！"
+
+    # 显示登录信息
+    echo "\n默认登录信息:"
+    echo "----------------------------------------"
+    echo "用户名: admin"
+    echo "密码: admin123"
+    echo "----------------------------------------"
 }
 
 # 错误处理函数
@@ -464,6 +493,39 @@ cleanup() {
 # 设置退出时清理
 trap cleanup EXIT
 
+# 从 GitHub 拉取项目
+clone_repository() {
+    log_info "从 GitHub 拉取项目..."
+
+    # 检查目标目录是否存在
+    if [ -d "$PROJECT_NAME" ]; then
+        log_warning "目录 $PROJECT_NAME 已存在"
+        read -p "是否删除现有目录并重新拉取？(y/n): " confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            log_info "删除现有目录..."
+            rm -rf "$PROJECT_NAME"
+        else
+            log_info "使用现有目录..."
+            cd "$PROJECT_NAME"
+            log_info "更新仓库..."
+            git pull
+            cd ..
+            return
+        fi
+    fi
+
+    # 克隆仓库
+    log_info "克隆仓库 $GITHUB_REPO..."
+    git clone "$GITHUB_REPO" "$PROJECT_NAME"
+
+    if [ $? -ne 0 ]; then
+        log_error "克隆仓库失败"
+        exit 1
+    fi
+
+    log_success "仓库克隆成功"
+}
+
 # 主函数
 main() {
     echo "========================================"
@@ -482,6 +544,12 @@ main() {
     # 安装基本依赖
     install_basic_deps
 
+    # 从 GitHub 拉取项目
+    clone_repository
+
+    # 进入项目目录
+    cd "$PROJECT_NAME"
+
     # 安装 Node.js
     install_nodejs
 
@@ -494,8 +562,8 @@ main() {
     # 安装 SQLite
     install_sqlite
 
-    # 安装 Nginx
-    install_nginx
+    # 安装 Caddy
+    install_caddy
 
     # 部署后端
     deploy_backend

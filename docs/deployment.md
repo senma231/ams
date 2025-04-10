@@ -44,7 +44,35 @@ npm run build
 
 ### 部署选项
 
-#### 选项 1: Nginx (推荐)
+#### 选项 1: Caddy (推荐)
+```bash
+# 安装 Caddy
+sudo apt update
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+sudo curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+sudo curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+
+# 配置 Caddy
+sudo nano /etc/caddy/Caddyfile
+
+# 添加以下配置
+:80 {
+    root * /path/to/frontend/dist
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server
+    encode gzip
+}
+
+# 重启 Caddy
+sudo systemctl reload caddy
+```
+
+#### 选项 2: Nginx
 ```bash
 # 安装 Nginx
 sudo apt update
@@ -59,11 +87,11 @@ server {
     server_name your-domain.com;
     root /path/to/frontend/dist;
     index index.html;
-    
+
     location / {
         try_files $uri $uri/ /index.html;
     }
-    
+
     location /api {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
@@ -78,43 +106,6 @@ server {
 sudo ln -s /etc/nginx/sites-available/asset-management /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
-```
-
-#### 选项 2: Apache
-```bash
-# 安装 Apache
-sudo apt update
-sudo apt install apache2
-
-# 启用必要的模块
-sudo a2enmod proxy
-sudo a2enmod proxy_http
-sudo a2enmod rewrite
-
-# 配置 Apache
-sudo nano /etc/apache2/sites-available/asset-management.conf
-
-# 添加以下配置
-<VirtualHost *:80>
-    ServerName your-domain.com
-    DocumentRoot /path/to/frontend/dist
-    
-    <Directory /path/to/frontend/dist>
-        Options -Indexes +FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-    
-    ProxyPass /api http://localhost:3000/api
-    ProxyPassReverse /api http://localhost:3000/api
-    
-    ErrorLog ${APACHE_LOG_DIR}/asset-management-error.log
-    CustomLog ${APACHE_LOG_DIR}/asset-management-access.log combined
-</VirtualHost>
-
-# 启用站点
-sudo a2ensite asset-management.conf
-sudo systemctl restart apache2
 ```
 
 ## 后端部署
@@ -192,7 +183,33 @@ chmod +x backup.sh
 
 ## 性能优化
 
-1. **启用 Nginx 缓存**
+1. **Caddy 静态资源缓存**
+   ```
+   # Caddyfile
+   :80 {
+       root * /path/to/frontend/dist
+
+       # 缓存静态资源
+       @static {
+           path *.js *.css *.png *.jpg *.jpeg *.gif *.ico
+       }
+       header @static Cache-Control "public, max-age=2592000"
+
+       # 其他配置...
+   }
+   ```
+
+2. **Caddy 压缩**
+   ```
+   # Caddyfile
+   :80 {
+       root * /path/to/frontend/dist
+       encode gzip
+       # 其他配置...
+   }
+   ```
+
+3. **Nginx 缓存（如果使用 Nginx）**
    ```nginx
    location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
        expires 30d;
@@ -200,7 +217,7 @@ chmod +x backup.sh
    }
    ```
 
-2. **压缩静态资源**
+4. **Nginx 压缩（如果使用 Nginx）**
    ```nginx
    gzip on;
    gzip_comp_level 5;
@@ -235,7 +252,7 @@ chmod +x backup.sh
    - 使用浏览器开发工具分析性能瓶颈
 
 ### 日志位置
+- 前端（Caddy）：`/var/log/caddy/access.log` 和 `/var/log/caddy/error.log`
 - 前端（Nginx）：`/var/log/nginx/error.log`
-- 前端（Apache）：`/var/log/apache2/asset-management-error.log`
 - 后端：`backend/logs/combined.log` 和 `backend/logs/error.log`
 - PM2：`pm2 logs asset-management-backend`
