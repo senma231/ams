@@ -861,7 +861,7 @@ EOF
 
     # 返回上级目录
     cd ..
-}
+fi
 
 # 创建备份脚本
 create_backup_script() {
