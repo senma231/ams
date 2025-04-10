@@ -74,7 +74,37 @@ asset-management-system/
 
 ## 生产环境部署
 
-请参考 `docs/deployment.md` 文件获取生产环境部署指南。
+### 一键部署
+
+在 Linux 服务器上，您可以使用以下命令一键部署资产管理系统：
+
+```bash
+# 标准部署（会在关键步骤提示确认）
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/senma231/ams/master/deploy.sh)"
+
+# 快速部署（跳过所有确认提示，自动安装或更新所有组件）
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/senma231/ams/master/deploy.sh)" -q
+```
+
+此脚本将自动：
+- 从 GitHub 拉取项目
+- 安装所有必要的依赖（Node.js、PM2、SQLite、Caddy）
+- 配置并启动前端和后端服务
+- 设置定期备份
+
+部署完成后，您可以通过服务器 IP 地址访问系统。
+
+#### 为什么选择 Caddy
+
+我们选择 Caddy 作为 Web 服务器，因为它：
+- 自动配置 HTTPS（自动申请和更新 SSL 证书）
+- 配置简单直观，几行代码即可完成设置
+- 内置反向代理、静态文件服务等功能
+- 默认配置更安全，减少配置错误
+
+### 手动部署
+
+如果您希望手动部署，请参考 `docs/deployment.md` 文件获取详细的部署指南。
 
 ## 许可证
 

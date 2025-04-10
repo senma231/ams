@@ -10,6 +10,10 @@ set -e
 GITHUB_REPO="https://github.com/senma231/ams.git"
 PROJECT_NAME="ams"
 
+# 部署模式
+# 如果设置为 true，将跳过所有确认提示，自动安装或更新所有组件
+QUICK_DEPLOY=false
+
 # 创建日志文件
 LOG_FILE="deploy_$(date +"%Y%m%d_%H%M%S").log"
 touch "$LOG_FILE"
@@ -143,11 +147,37 @@ install_nodejs() {
             log_success "Node.js 版本满足要求"
         else
             log_warning "Node.js 版本过低，需要 v18.0.0 或更高版本"
-            install_nodejs_nvm
+            if [ "$QUICK_DEPLOY" = true ]; then
+                log_info "快速部署模式: 自动升级 Node.js"
+                install_nodejs_nvm
+            else
+                read -p "是否升级 Node.js 到 v18? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    install_nodejs_nvm
+                else
+                    log_error "Node.js 版本不满足要求，部署可能会失败"
+                    read -p "是否继续部署? (y/n): " continue
+                    if [ "$continue" != "y" ] && [ "$continue" != "Y" ]; then
+                        log_error "部署已取消"
+                        exit 1
+                    fi
+                fi
+            fi
         fi
     else
-        log_info "未检测到 Node.js，准备安装..."
-        install_nodejs_nvm
+        log_info "未检测到 Node.js，需要安装"
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动安装 Node.js"
+            install_nodejs_nvm
+        else
+            read -p "是否安装 Node.js v18? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                install_nodejs_nvm
+            else
+                log_error "Node.js 是必需的组件，无法继续部署"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -190,18 +220,52 @@ install_npm() {
         log_info "检测到 npm 版本: $NPM_VER"
 
         # 检查版本是否满足要求
-        if [ "$(printf '%s\n' "6.0.0" "$NPM_VER" | sort -V | head -n1)" = "6.0.0" ]; then
+        if [ "$(printf '%s\n' "8.0.0" "$NPM_VER" | sort -V | head -n1)" = "8.0.0" ]; then
             log_success "npm 版本满足要求"
         else
-            log_warning "npm 版本过低，需要 v6.0.0 或更高版本"
-            log_info "更新 npm..."
-            npm install -g npm@latest
-            NPM_VER=$(npm -v)
-            log_success "npm 更新到版本 $NPM_VER"
+            log_warning "npm 版本过低，需要 v8.0.0 或更高版本"
+            if [ "$QUICK_DEPLOY" = true ]; then
+                log_info "快速部署模式: 自动更新 npm"
+                npm install -g npm@latest
+                NPM_VER=$(npm -v)
+                log_success "npm 更新到版本 $NPM_VER"
+            else
+                read -p "是否更新 npm? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    log_info "更新 npm..."
+                    npm install -g npm@latest
+                    NPM_VER=$(npm -v)
+                    log_success "npm 更新到版本 $NPM_VER"
+                else
+                    log_warning "继续使用当前 npm 版本，可能会影响部署"
+                fi
+            fi
         fi
     else
         log_error "npm 未安装，这不应该发生，因为它应该随 Node.js 一起安装"
-        exit 1
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动安装 npm"
+            $INSTALL_CMD npm
+            if [ $? -ne 0 ]; then
+                log_error "安装 npm 失败"
+                exit 1
+            fi
+            log_success "npm 安装完成"
+        else
+            read -p "是否尝试安装 npm? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "安装 npm..."
+                $INSTALL_CMD npm
+                if [ $? -ne 0 ]; then
+                    log_error "安装 npm 失败"
+                    exit 1
+                fi
+                log_success "npm 安装完成"
+            else
+                log_error "npm 是必需的组件，无法继续部署"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -212,14 +276,49 @@ install_pm2() {
     if command -v pm2 &> /dev/null; then
         PM2_VER=$(pm2 -v)
         log_info "检测到 PM2 版本: $PM2_VER"
-    else
-        log_info "安装 PM2..."
-        npm install -g pm2
-        if [ $? -ne 0 ]; then
-            log_error "安装 PM2 失败"
-            exit 1
+
+        # 检查是否需要更新
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动更新 PM2"
+            npm update -g pm2
+            PM2_VER=$(pm2 -v)
+            log_success "PM2 更新到版本 $PM2_VER"
+        else
+            read -p "是否更新 PM2 到最新版本? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "更新 PM2..."
+                npm update -g pm2
+                PM2_VER=$(pm2 -v)
+                log_success "PM2 更新到版本 $PM2_VER"
+            else
+                log_info "继续使用当前 PM2 版本"
+            fi
         fi
-        log_success "PM2 安装完成"
+    else
+        log_info "PM2 未安装，需要安装"
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动安装 PM2"
+            npm install -g pm2
+            if [ $? -ne 0 ]; then
+                log_error "安装 PM2 失败"
+                exit 1
+            fi
+            log_success "PM2 安装完成"
+        else
+            read -p "是否安装 PM2? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "安装 PM2..."
+                npm install -g pm2
+                if [ $? -ne 0 ]; then
+                    log_error "安装 PM2 失败"
+                    exit 1
+                fi
+                log_success "PM2 安装完成"
+            else
+                log_error "PM2 是必需的组件，无法继续部署"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -230,14 +329,54 @@ install_sqlite() {
     if command -v sqlite3 &> /dev/null; then
         SQLITE_VER=$(sqlite3 --version | awk '{print $1}')
         log_info "检测到 SQLite 版本: $SQLITE_VER"
-    else
-        log_info "安装 SQLite..."
-        $INSTALL_CMD sqlite3
-        if [ $? -ne 0 ]; then
-            log_error "安装 SQLite 失败"
-            exit 1
+
+        # 检查版本是否满足要求
+        if [ "$(printf '%s\n' "3.0.0" "$SQLITE_VER" | sort -V | head -n1)" = "3.0.0" ]; then
+            log_success "SQLite 版本满足要求"
+        else
+            log_warning "SQLite 版本过低，需要 v3.0.0 或更高版本"
+            if [ "$QUICK_DEPLOY" = true ]; then
+                log_info "快速部署模式: 自动更新 SQLite"
+                $INSTALL_CMD sqlite3
+                SQLITE_VER=$(sqlite3 --version | awk '{print $1}')
+                log_success "SQLite 更新到版本 $SQLITE_VER"
+            else
+                read -p "是否尝试更新 SQLite? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    log_info "更新 SQLite..."
+                    $INSTALL_CMD sqlite3
+                    SQLITE_VER=$(sqlite3 --version | awk '{print $1}')
+                    log_success "SQLite 更新到版本 $SQLITE_VER"
+                else
+                    log_warning "继续使用当前 SQLite 版本，可能会影响部署"
+                fi
+            fi
         fi
-        log_success "SQLite 安装完成"
+    else
+        log_info "SQLite 未安装，需要安装"
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动安装 SQLite"
+            $INSTALL_CMD sqlite3
+            if [ $? -ne 0 ]; then
+                log_error "安装 SQLite 失败"
+                exit 1
+            fi
+            log_success "SQLite 安装完成"
+        else
+            read -p "是否安装 SQLite? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "安装 SQLite..."
+                $INSTALL_CMD sqlite3
+                if [ $? -ne 0 ]; then
+                    log_error "安装 SQLite 失败"
+                    exit 1
+                fi
+                log_success "SQLite 安装完成"
+            else
+                log_error "SQLite 是必需的组件，无法继续部署"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -248,35 +387,117 @@ install_caddy() {
     if command -v caddy &> /dev/null; then
         CADDY_VER=$(caddy version | head -n1)
         log_info "检测到 Caddy 版本: $CADDY_VER"
-    else
-        log_info "安装 Caddy..."
 
-        # 根据不同的操作系统使用不同的安装方法
-        if [ "$PKG_MANAGER" = "apt" ]; then
-            # Debian/Ubuntu
-            log_info "使用 apt 安装 Caddy..."
-            apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-            apt update
-            apt install -y caddy
-        elif [ "$PKG_MANAGER" = "yum" ]; then
-            # CentOS/RHEL
-            log_info "使用 yum 安装 Caddy..."
-            yum install -y yum-plugin-copr
-            yum copr enable -y @caddy/caddy
-            yum install -y caddy
+        # 检查是否需要更新
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动更新 Caddy"
+
+            # 根据不同的操作系统使用不同的更新方法
+            if [ "$PKG_MANAGER" = "apt" ]; then
+                # Debian/Ubuntu
+                apt update
+                apt install -y caddy
+            elif [ "$PKG_MANAGER" = "yum" ]; then
+                # CentOS/RHEL
+                yum update -y caddy
+            else
+                # 通用方法
+                log_warning "无法自动更新 Caddy，请手动更新"
+            fi
+
+            CADDY_VER=$(caddy version | head -n1)
+            log_success "Caddy 更新到版本 $CADDY_VER"
         else
-            # 通用方法
-            log_info "使用通用方法安装 Caddy..."
-            curl -fsSL https://getcaddy.com | bash -s personal
-        fi
+            read -p "是否更新 Caddy 到最新版本? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "更新 Caddy..."
 
-        if [ $? -ne 0 ]; then
-            log_error "安装 Caddy 失败"
-            exit 1
+                # 根据不同的操作系统使用不同的更新方法
+                if [ "$PKG_MANAGER" = "apt" ]; then
+                    # Debian/Ubuntu
+                    apt update
+                    apt install -y caddy
+                elif [ "$PKG_MANAGER" = "yum" ]; then
+                    # CentOS/RHEL
+                    yum update -y caddy
+                else
+                    # 通用方法
+                    log_warning "无法自动更新 Caddy，请手动更新"
+                fi
+
+                CADDY_VER=$(caddy version | head -n1)
+                log_success "Caddy 更新到版本 $CADDY_VER"
+            else
+                log_info "继续使用当前 Caddy 版本"
+            fi
         fi
-        log_success "Caddy 安装完成"
+    else
+        log_info "Caddy 未安装，需要安装"
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动安装 Caddy"
+
+            # 根据不同的操作系统使用不同的安装方法
+            if [ "$PKG_MANAGER" = "apt" ]; then
+                # Debian/Ubuntu
+                log_info "使用 apt 安装 Caddy..."
+                apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+                apt update
+                apt install -y caddy
+            elif [ "$PKG_MANAGER" = "yum" ]; then
+                # CentOS/RHEL
+                log_info "使用 yum 安装 Caddy..."
+                yum install -y yum-plugin-copr
+                yum copr enable -y @caddy/caddy
+                yum install -y caddy
+            else
+                # 通用方法
+                log_info "使用通用方法安装 Caddy..."
+                curl -fsSL https://getcaddy.com | bash -s personal
+            fi
+
+            if [ $? -ne 0 ]; then
+                log_error "安装 Caddy 失败"
+                exit 1
+            fi
+            log_success "Caddy 安装完成"
+        else
+            read -p "是否安装 Caddy? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "安装 Caddy..."
+
+                # 根据不同的操作系统使用不同的安装方法
+                if [ "$PKG_MANAGER" = "apt" ]; then
+                    # Debian/Ubuntu
+                    log_info "使用 apt 安装 Caddy..."
+                    apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+                    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+                    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+                    apt update
+                    apt install -y caddy
+                elif [ "$PKG_MANAGER" = "yum" ]; then
+                    # CentOS/RHEL
+                    log_info "使用 yum 安装 Caddy..."
+                    yum install -y yum-plugin-copr
+                    yum copr enable -y @caddy/caddy
+                    yum install -y caddy
+                else
+                    # 通用方法
+                    log_info "使用通用方法安装 Caddy..."
+                    curl -fsSL https://getcaddy.com | bash -s personal
+                fi
+
+                if [ $? -ne 0 ]; then
+                    log_error "安装 Caddy 失败"
+                    exit 1
+                fi
+                log_success "Caddy 安装完成"
+            else
+                log_error "Caddy 是必需的组件，无法继续部署"
+                exit 1
+            fi
+        fi
     fi
 }
 
@@ -501,17 +722,26 @@ clone_repository() {
     # 检查目标目录是否存在
     if [ -d "$PROJECT_NAME" ]; then
         log_warning "目录 $PROJECT_NAME 已存在"
-        read -p "是否删除现有目录并重新拉取？(y/n): " confirm
-        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            log_info "删除现有目录..."
-            rm -rf "$PROJECT_NAME"
-        else
-            log_info "使用现有目录..."
+        if [ "$QUICK_DEPLOY" = true ]; then
+            log_info "快速部署模式: 自动更新现有目录"
             cd "$PROJECT_NAME"
             log_info "更新仓库..."
             git pull
             cd ..
             return
+        else
+            read -p "是否删除现有目录并重新拉取？(y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                log_info "删除现有目录..."
+                rm -rf "$PROJECT_NAME"
+            else
+                log_info "使用现有目录..."
+                cd "$PROJECT_NAME"
+                log_info "更新仓库..."
+                git pull
+                cd ..
+                return
+            fi
         fi
     fi
 
@@ -538,6 +768,18 @@ main() {
 
     # 检测操作系统
     detect_os
+
+    # 检查是否使用快速部署模式
+    if [ "$1" = "--quick" ] || [ "$1" = "-q" ]; then
+        QUICK_DEPLOY=true
+        log_info "快速部署模式已启用，将跳过所有确认提示"
+    else
+        read -p "是否启用快速部署模式？跳过所有确认提示 (y/n): " confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            QUICK_DEPLOY=true
+            log_info "快速部署模式已启用"
+        fi
+    fi
 
     # 更新系统包
     update_system
