@@ -54,19 +54,40 @@ sudo curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | 
 sudo apt update
 sudo apt install -y caddy
 
-# 配置 Caddy
+# 配置 Caddy (使用 IP 地址)
 sudo nano /etc/caddy/Caddyfile
 
 # 添加以下配置
 :80 {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
     root * /path/to/frontend/dist
     route {
         reverse_proxy /api/* localhost:3000
         try_files {path} {path}/ /index.html
     }
-    file_server
+    file_server browse
     encode gzip
 }
+
+# 或者使用域名配置 (自动 HTTPS)
+example.com {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
+    root * /path/to/frontend/dist
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server browse
+    encode gzip
+}
+
+# 设置文件权限
+sudo chown -R caddy:caddy /path/to/frontend/dist
+sudo chmod -R 755 /path/to/frontend/dist
 
 # 重启 Caddy
 sudo systemctl reload caddy
@@ -197,7 +218,9 @@ sudo bash deploy.sh --quick
    - 安装前端和后端依赖
    - 构建前端应用
    - 检查并处理端口冲突（如端口 80 被占用）
+   - 支持域名配置（可选）并自动启用 HTTPS
    - 配置并启动 Caddy 服务（如果端口 80 被占用，会切换到端口 8080）
+   - 设置正确的文件权限，避免 403 错误
    - 使用 PM2 启动后端服务
 
 4. **设置备份**

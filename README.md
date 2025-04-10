@@ -90,10 +90,11 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/senma231/ams/master
 - 从 GitHub 拉取项目
 - 安装所有必要的依赖（Node.js、PM2、SQLite、Caddy）
 - 检查并处理端口冲突（如端口 80 被占用）
+- 支持域名配置（可选）并自动启用 HTTPS
 - 配置并启动前端和后端服务
 - 设置定期备份
 
-部署完成后，您可以通过服务器 IP 地址访问系统。如果端口 80 被占用，脚本会自动切换到端口 8080。
+部署完成后，您可以通过服务器公网 IP 地址访问系统。如果端口 80 被占用，脚本会自动切换到端口 8080。如果配置了域名，Caddy 将自动申请和配置 SSL 证书。
 
 #### 为什么选择 Caddy
 

@@ -628,19 +628,50 @@ deploy_frontend() {
         log_success "端口 80 可用"
     fi
 
+    # 询问是否配置域名
+    DOMAIN_NAME=""
+    if [ "$QUICK_DEPLOY" != true ]; then
+        read -p "是否配置域名? (y/n): " confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
+        fi
+    fi
+
     # 创建 Caddy 配置文件
     log_info "创建 Caddy 配置文件..."
-    cat > /etc/caddy/Caddyfile << EOF
+    if [ -z "$DOMAIN_NAME" ]; then
+        # 使用 IP 配置
+        cat > /etc/caddy/Caddyfile << EOF
 :80 {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
     root * $FRONTEND_DIST
     route {
         reverse_proxy /api/* localhost:3000
         try_files {path} {path}/ /index.html
     }
-    file_server
+    file_server browse
     encode gzip
 }
 EOF
+    else
+        # 使用域名配置 (自动 HTTPS)
+        cat > /etc/caddy/Caddyfile << EOF
+$DOMAIN_NAME {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server browse
+    encode gzip
+}
+EOF
+    fi
 
     # 重启 Caddy
     log_info "重启 Caddy..."
@@ -660,17 +691,39 @@ EOF
 
         # 尝试使用其他端口
         log_info "尝试使用端口 8080..."
-        cat > /etc/caddy/Caddyfile << EOF
+        if [ -z "$DOMAIN_NAME" ]; then
+            # 使用 IP 配置
+            cat > /etc/caddy/Caddyfile << EOF
 :8080 {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
     root * $FRONTEND_DIST
     route {
         reverse_proxy /api/* localhost:3000
         try_files {path} {path}/ /index.html
     }
-    file_server
+    file_server browse
     encode gzip
 }
 EOF
+        else
+            # 使用域名配置，但在端口 8080 上
+            cat > /etc/caddy/Caddyfile << EOF
+$DOMAIN_NAME:8080 {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server browse
+    encode gzip
+}
+EOF
+        fi
 
         systemctl restart caddy
         if [ $? -ne 0 ]; then
@@ -681,6 +734,11 @@ EOF
             log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
         fi
     fi
+
+    # 设置正确的文件权限
+    log_info "设置文件权限..."
+    chown -R caddy:caddy $FRONTEND_DIST
+    chmod -R 755 $FRONTEND_DIST
 
     # 检查 Caddy 是否运行
     if ! systemctl is-active --quiet caddy; then
@@ -739,10 +797,20 @@ EOF
 
 # 显示部署信息
 show_deployment_info() {
-    # 获取服务器 IP 地址
-    SERVER_IP=$(hostname -I | awk '{print $1}')
-    if [ -z "$SERVER_IP" ]; then
-        SERVER_IP="localhost"
+    # 尝试获取公网 IP
+    log_info "获取服务器公网 IP..."
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s http://ifconfig.me || curl -s icanhazip.com)
+
+    # 如果无法获取公网 IP，则使用本地 IP
+    if [ -z "$PUBLIC_IP" ]; then
+        SERVER_IP=$(hostname -I | awk '{print $1}')
+        if [ -z "$SERVER_IP" ]; then
+            SERVER_IP="localhost"
+        fi
+        log_warning "无法获取公网 IP，使用本地 IP: $SERVER_IP"
+    else
+        SERVER_IP=$PUBLIC_IP
+        log_info "检测到公网 IP: $SERVER_IP"
     fi
 
     # 检查 Caddy 使用的端口
@@ -751,10 +819,21 @@ show_deployment_info() {
         CADDY_PORT=8080
     fi
 
+    # 检查是否配置了域名
+    if grep -q "^[^:]" /etc/caddy/Caddyfile; then
+        DOMAIN_NAME=$(grep "^[^:]" /etc/caddy/Caddyfile | awk '{print $1}')
+        log_info "检测到域名配置: $DOMAIN_NAME"
+        ACCESS_URL="https://$DOMAIN_NAME"
+        API_URL="https://$DOMAIN_NAME/api"
+    else
+        ACCESS_URL="http://$SERVER_IP:$CADDY_PORT"
+        API_URL="http://$SERVER_IP:$CADDY_PORT/api"
+    fi
+
     log_info "部署信息:"
     echo "========================================"
-    echo "前端 URL: http://$SERVER_IP:$CADDY_PORT"
-    echo "后端 API: http://$SERVER_IP:$CADDY_PORT/api"
+    echo "前端 URL: $ACCESS_URL"
+    echo "后端 API: $API_URL"
     echo "后端进程: pm2 status"
     echo "日志位置: $PROJECT_NAME/backend/logs/"
     echo "数据库位置: $PROJECT_NAME/backend/data/database.db"
