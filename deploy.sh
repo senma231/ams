@@ -566,8 +566,33 @@ deploy_frontend() {
     if [ -f "/etc/nginx/sites-enabled/default" ] || [ -d "/etc/nginx/conf.d" ] && [ "$(ls -A /etc/nginx/conf.d 2>/dev/null)" ]; then
         log_info "检测到现有 Nginx 配置"
         EXISTING_NGINX_CONFIG=true
+    fi
 
-        # 即使在快速部署模式下，也要询问域名配置
+    # 配置 Nginx
+    log_info "配置 Nginx..."
+
+    # 获取当前目录的绝对路径
+    FRONTEND_DIST=$(pwd)/dist
+
+    # 创建 Nginx 配置目录
+    if [ ! -d "/etc/nginx/conf.d" ]; then
+        log_info "创建 Nginx 配置目录..."
+        mkdir -p /etc/nginx/conf.d
+    fi
+
+    # 检查是否使用 sites-available/sites-enabled 结构
+    NGINX_USES_SITES_ENABLED=false
+    if [ -d "/etc/nginx/sites-available" ] || [ -d "/etc/nginx/sites-enabled" ]; then
+        NGINX_USES_SITES_ENABLED=true
+        # 确保目录存在
+        mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+    fi
+
+    # 如果已经添加到现有配置，则跳过创建新配置
+    if [ "$EXISTING_NGINX_CONFIG" = true ]; then
+        log_info "使用现有 Nginx 配置并添加资产管理系统"
+
+        # 即使在快速部署模式下，也要询问用户
         echo ""
         log_warning "检测到现有 Nginx 配置，可能有其他项目正在使用 Nginx"
         echo "----------------------------------------"
@@ -576,22 +601,22 @@ deploy_frontend() {
         echo "----------------------------------------"
         read -p "请选择 (1/2): " nginx_option
 
-            if [ "$nginx_option" = "2" ]; then
-                # 询问是否使用子域名或路径
-                echo ""
-                log_info "添加方式选择"
-                echo "----------------------------------------"
-                echo "选项 1: 使用子域名 (例如: ams.example.com)"
-                echo "选项 2: 使用路径前缀 (例如: example.com/ams)"
-                echo "----------------------------------------"
-                read -p "请选择 (1/2): " add_option
+        if [ "$nginx_option" = "2" ]; then
+            # 询问是否使用子域名或路径
+            echo ""
+            log_info "添加方式选择"
+            echo "----------------------------------------"
+            echo "选项 1: 使用子域名 (例如: ams.example.com)"
+            echo "选项 2: 使用路径前缀 (例如: example.com/ams)"
+            echo "----------------------------------------"
+            read -p "请选择 (1/2): " add_option
 
-                if [ "$add_option" = "1" ]; then
-                    read -p "请输入子域名: " SUBDOMAIN
-                    DOMAIN_NAME=$SUBDOMAIN
+            if [ "$add_option" = "1" ]; then
+                read -p "请输入子域名: " SUBDOMAIN
+                DOMAIN_NAME=$SUBDOMAIN
 
-                    # 创建新的站点配置文件
-                    cat > /etc/nginx/conf.d/ams.conf << EOF
+                # 创建新的站点配置文件
+                cat > /etc/nginx/conf.d/ams.conf << EOF
 # 资产管理系统 - 子域名: $SUBDOMAIN
 server {
     listen 80;
@@ -619,15 +644,15 @@ server {
     add_header Access-Control-Allow-Origin *;
 }
 EOF
-                    log_success "已添加子域名配置: $SUBDOMAIN"
+                log_success "已添加子域名配置: $SUBDOMAIN"
 
-                elif [ "$add_option" = "2" ]; then
-                    read -p "请输入域名: " DOMAIN
-                    read -p "请输入路径前缀 (例如: ams): " PATH_PREFIX
-                    DOMAIN_NAME="$DOMAIN/$PATH_PREFIX"
+            elif [ "$add_option" = "2" ]; then
+                read -p "请输入域名: " DOMAIN
+                read -p "请输入路径前缀 (例如: ams): " PATH_PREFIX
+                DOMAIN_NAME="$DOMAIN/$PATH_PREFIX"
 
-                    # 创建新的站点配置文件
-                    cat > /etc/nginx/conf.d/ams.conf << EOF
+                # 创建新的站点配置文件
+                cat > /etc/nginx/conf.d/ams.conf << EOF
 # 资产管理系统 - 路径前缀: $DOMAIN/$PATH_PREFIX
 server {
     listen 80;
@@ -654,42 +679,16 @@ server {
     add_header Access-Control-Allow-Origin *;
 }
 EOF
-                    log_success "已添加路径配置: $PATH_PREFIX"
+                log_success "已添加路径配置: $PATH_PREFIX"
 
-                else
-                    log_error "无效选项，将覆盖现有配置"
-                    EXISTING_NGINX_CONFIG=false
-                fi
             else
-                log_warning "将覆盖现有 Nginx 配置"
+                log_error "无效选项，将覆盖现有配置"
                 EXISTING_NGINX_CONFIG=false
             fi
-            echo ""
-    fi
-
-    # 配置 Nginx
-    log_info "配置 Nginx..."
-
-    # 获取当前目录的绝对路径
-    FRONTEND_DIST=$(pwd)/dist
-
-    # 创建 Nginx 配置目录
-    if [ ! -d "/etc/nginx/conf.d" ]; then
-        log_info "创建 Nginx 配置目录..."
-        mkdir -p /etc/nginx/conf.d
-    fi
-
-    # 检查是否使用 sites-available/sites-enabled 结构
-    NGINX_USES_SITES_ENABLED=false
-    if [ -d "/etc/nginx/sites-available" ] || [ -d "/etc/nginx/sites-enabled" ]; then
-        NGINX_USES_SITES_ENABLED=true
-        # 确保目录存在
-        mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-    fi
-
-    # 如果已经添加到现有配置，则跳过创建新配置
-    if [ "$EXISTING_NGINX_CONFIG" = true ]; then
-        log_info "使用现有 Nginx 配置并添加资产管理系统"
+        else
+            log_warning "将覆盖现有 Nginx 配置"
+            EXISTING_NGINX_CONFIG=false
+        fi
     else
         # 检查端口 80 是否被占用
         log_info "检查端口 80 是否被占用..."
@@ -749,6 +748,9 @@ EOF
         echo "您可以为资产管理系统配置域名"
         echo "如果不配置域名，将使用服务器 IP 地址访问系统"
         echo "----------------------------------------"
+
+        # 即使在快速部署模式下，也要询问域名配置
+        # 这里特意不检查 QUICK_DEPLOY 变量
         read -p "是否配置域名? (y/n): " confirm
         if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
             read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
