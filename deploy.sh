@@ -567,6 +567,94 @@ deploy_frontend() {
         exit 1
     fi
 
+    # 检查是否已经有其他项目使用 Caddy
+    EXISTING_CADDY_CONFIG=false
+    if [ -f "/etc/caddy/Caddyfile" ] && [ -s "/etc/caddy/Caddyfile" ]; then
+        log_info "检测到现有 Caddy 配置"
+        EXISTING_CADDY_CONFIG=true
+
+        if [ "$QUICK_DEPLOY" != true ]; then
+            echo ""
+            log_warning "检测到现有 Caddy 配置，可能有其他项目正在使用 Caddy"
+            echo "----------------------------------------"
+            echo "选项 1: 覆盖现有配置 (可能影响其他项目)"
+            echo "选项 2: 将资产管理系统添加到现有配置中"
+            echo "----------------------------------------"
+            read -p "请选择 (1/2): " caddy_option
+
+            if [ "$caddy_option" = "2" ]; then
+                # 备份现有配置
+                cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +"%Y%m%d%H%M%S")
+                log_info "已备份现有 Caddy 配置"
+
+                # 询问是否使用子域名或路径
+                echo ""
+                log_info "添加方式选择"
+                echo "----------------------------------------"
+                echo "选项 1: 使用子域名 (例如: ams.example.com)"
+                echo "选项 2: 使用路径前缀 (例如: example.com/ams)"
+                echo "----------------------------------------"
+                read -p "请选择 (1/2): " add_option
+
+                if [ "$add_option" = "1" ]; then
+                    read -p "请输入子域名: " SUBDOMAIN
+                    DOMAIN_NAME=$SUBDOMAIN
+
+                    # 添加子域名配置
+                    cat >> /etc/caddy/Caddyfile << EOF
+
+# 资产管理系统 - 子域名: $SUBDOMAIN
+$SUBDOMAIN {
+    # 允许所有访问
+    header Access-Control-Allow-Origin *
+
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server browse
+    encode gzip
+}
+EOF
+                    log_success "已添加子域名配置: $SUBDOMAIN"
+
+                elif [ "$add_option" = "2" ]; then
+                    read -p "请输入路径前缀 (例如: /ams): " PATH_PREFIX
+
+                    # 添加路径配置
+                    cat >> /etc/caddy/Caddyfile << EOF
+
+# 资产管理系统 - 路径: $PATH_PREFIX
+handle $PATH_PREFIX/* {
+    uri strip_prefix $PATH_PREFIX
+    root * $FRONTEND_DIST
+    route {
+        reverse_proxy /api/* localhost:3000
+        try_files {path} {path}/ /index.html
+    }
+    file_server browse
+    encode gzip
+}
+EOF
+                    log_success "已添加路径配置: $PATH_PREFIX"
+
+                else
+                    log_error "无效选项，将覆盖现有配置"
+                    EXISTING_CADDY_CONFIG=false
+                fi
+            else
+                log_warning "将覆盖现有 Caddy 配置"
+                EXISTING_CADDY_CONFIG=false
+            fi
+            echo ""
+        else
+            # 快速部署模式下默认覆盖
+            log_warning "快速部署模式: 将覆盖现有 Caddy 配置"
+            EXISTING_CADDY_CONFIG=false
+        fi
+    fi
+
     # 配置 Caddy
     log_info "配置 Caddy..."
 
@@ -578,6 +666,11 @@ deploy_frontend() {
         log_info "创建 Caddy 配置目录..."
         mkdir -p /etc/caddy
     fi
+
+    # 如果已经添加到现有配置，则跳过创建新配置
+    if [ "$EXISTING_CADDY_CONFIG" = true ]; then
+        log_info "使用现有 Caddy 配置并添加资产管理系统"
+    else
 
     # 检查端口 80 是否被占用
     log_info "检查端口 80 是否被占用..."
@@ -631,10 +724,20 @@ deploy_frontend() {
     # 询问是否配置域名
     DOMAIN_NAME=""
     if [ "$QUICK_DEPLOY" != true ]; then
+        echo ""
+        log_info "域名配置"
+        echo "----------------------------------------"
+        echo "您可以为资产管理系统配置域名，这将启用 HTTPS"
+        echo "如果不配置域名，将使用服务器 IP 地址访问系统"
+        echo "----------------------------------------"
         read -p "是否配置域名? (y/n): " confirm
         if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
             read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
+            log_info "已设置域名: $DOMAIN_NAME"
+        else
+            log_info "不使用域名，将使用 IP 地址访问"
         fi
+        echo ""
     fi
 
     # 创建 Caddy 配置文件
@@ -691,9 +794,15 @@ EOF
 
         # 尝试使用其他端口
         log_info "尝试使用端口 8080..."
-        if [ -z "$DOMAIN_NAME" ]; then
-            # 使用 IP 配置
-            cat > /etc/caddy/Caddyfile << EOF
+
+        if [ "$EXISTING_CADDY_CONFIG" = true ]; then
+            # 如果使用现有配置，则不修改配置文件
+            log_warning "使用现有配置，无法自动切换端口。请手动修改 Caddy 配置。"
+        else
+            # 修改配置文件使用端口 8080
+            if [ -z "$DOMAIN_NAME" ]; then
+                # 使用 IP 配置
+                cat > /etc/caddy/Caddyfile << EOF
 :8080 {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -707,9 +816,9 @@ EOF
     encode gzip
 }
 EOF
-        else
-            # 使用域名配置，但在端口 8080 上
-            cat > /etc/caddy/Caddyfile << EOF
+            else
+                # 使用域名配置，但在端口 8080 上
+                cat > /etc/caddy/Caddyfile << EOF
 $DOMAIN_NAME:8080 {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -723,15 +832,16 @@ $DOMAIN_NAME:8080 {
     encode gzip
 }
 EOF
-        fi
+            fi
 
-        systemctl restart caddy
-        if [ $? -ne 0 ]; then
-            log_error "即使使用端口 8080 也无法启动 Caddy"
-            log_warning "继续部署过程，但前端可能无法访问"
-        else
-            log_success "Caddy 已在端口 8080 上启动"
-            log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+            systemctl restart caddy
+            if [ $? -ne 0 ]; then
+                log_error "即使使用端口 8080 也无法启动 Caddy"
+                log_warning "继续部署过程，但前端可能无法访问"
+            else
+                log_success "Caddy 已在端口 8080 上启动"
+                log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+            fi
         fi
     fi
 
@@ -820,11 +930,18 @@ show_deployment_info() {
     fi
 
     # 检查是否配置了域名
-    if grep -q "^[^:]" /etc/caddy/Caddyfile; then
-        DOMAIN_NAME=$(grep "^[^:]" /etc/caddy/Caddyfile | awk '{print $1}')
-        log_info "检测到域名配置: $DOMAIN_NAME"
-        ACCESS_URL="https://$DOMAIN_NAME"
-        API_URL="https://$DOMAIN_NAME/api"
+    if [ -f "/etc/caddy/Caddyfile" ]; then
+        # 使用更精确的方式检测域名配置
+        DOMAIN_CONFIG=$(grep -v "^[:space:]*#" /etc/caddy/Caddyfile | grep -v "^:" | grep "{" | head -n 1 | awk '{print $1}')
+
+        if [ ! -z "$DOMAIN_CONFIG" ] && [ "$DOMAIN_CONFIG" != "{" ]; then
+            log_info "检测到域名配置: $DOMAIN_CONFIG"
+            ACCESS_URL="https://$DOMAIN_CONFIG"
+            API_URL="https://$DOMAIN_CONFIG/api"
+        else
+            ACCESS_URL="http://$SERVER_IP:$CADDY_PORT"
+            API_URL="http://$SERVER_IP:$CADDY_PORT/api"
+        fi
     else
         ACCESS_URL="http://$SERVER_IP:$CADDY_PORT"
         API_URL="http://$SERVER_IP:$CADDY_PORT/api"
