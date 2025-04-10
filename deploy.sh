@@ -679,6 +679,14 @@ EOF
         mkdir -p /etc/nginx/conf.d
     fi
 
+    # 检查是否使用 sites-available/sites-enabled 结构
+    NGINX_USES_SITES_ENABLED=false
+    if [ -d "/etc/nginx/sites-available" ] || [ -d "/etc/nginx/sites-enabled" ]; then
+        NGINX_USES_SITES_ENABLED=true
+        # 确保目录存在
+        mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+    fi
+
     # 如果已经添加到现有配置，则跳过创建新配置
     if [ "$EXISTING_NGINX_CONFIG" = true ]; then
         log_info "使用现有 Nginx 配置并添加资产管理系统"
@@ -752,10 +760,11 @@ EOF
 
         # 创建 Nginx 配置文件
         log_info "创建 Nginx 配置文件..."
+
+        # 准备配置内容
         if [ -z "$DOMAIN_NAME" ]; then
             # 使用 IP 配置
-            cat > /etc/nginx/sites-available/default << EOF
-# 资产管理系统
+            CONFIG_CONTENT="# 资产管理系统
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -780,12 +789,10 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
-}
-EOF
+}"
         else
             # 使用域名配置
-            cat > /etc/nginx/sites-available/default << EOF
-# 资产管理系统
+            CONFIG_CONTENT="# 资产管理系统
 server {
     listen 80;
     listen [::]:80;
@@ -812,23 +819,33 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
-}
-EOF
+}"
         fi
 
-        # 确保符号链接存在
-        if [ ! -f "/etc/nginx/sites-enabled/default" ]; then
-            mkdir -p /etc/nginx/sites-enabled
-            ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
-        fi
+        # 根据 Nginx 配置结构选择正确的路径
+        if [ "$NGINX_USES_SITES_ENABLED" = true ]; then
+            # 使用 sites-available/sites-enabled 结构
+            echo "$CONFIG_CONTENT" > /etc/nginx/sites-available/default
 
-        # 修改 Nginx 主配置文件，包含 sites-enabled 目录
-        if ! grep -q "include /etc/nginx/sites-enabled/\*" /etc/nginx/nginx.conf; then
-            # 备份原始配置
-            cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.$(date +"%Y%m%d%H%M%S")
+            # 确保符号链接存在
+            if [ ! -f "/etc/nginx/sites-enabled/default" ]; then
+                ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
+            fi
 
-            # 在 http 块的结尾前添加 include 指令
-            sed -i '/http {/,/}/{s/}/    include \/etc\/nginx\/sites-enabled\/\*;\n}/}' /etc/nginx/nginx.conf
+            # 修改 Nginx 主配置文件，包含 sites-enabled 目录
+            if ! grep -q "include /etc/nginx/sites-enabled/\*" /etc/nginx/nginx.conf; then
+                # 备份原始配置
+                cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.$(date +"%Y%m%d%H%M%S")
+
+                # 在 http 块的结尾前添加 include 指令
+                sed -i '/http {/,/}/{s/}/    include \/etc\/nginx\/sites-enabled\/\*;\n}/}' /etc/nginx/nginx.conf
+            fi
+
+            log_info "Nginx 配置已写入 /etc/nginx/sites-available/default"
+        else
+            # 使用 conf.d 结构
+            echo "$CONFIG_CONTENT" > /etc/nginx/conf.d/default.conf
+            log_info "Nginx 配置已写入 /etc/nginx/conf.d/default.conf"
         fi
 
         # 检查 Nginx 配置是否有语法错误
@@ -853,11 +870,10 @@ EOF
                 # 如果使用现有配置，则不修改配置文件
                 log_warning "使用现有配置，无法自动切换端口。请手动修改 Nginx 配置。"
             else
-                # 修改配置文件使用端口 8080
+                # 准备端口 8080 的配置内容
                 if [ -z "$DOMAIN_NAME" ]; then
                     # 使用 IP 配置
-                    cat > /etc/nginx/sites-available/default << EOF
-# 资产管理系统
+                    CONFIG_CONTENT="# 资产管理系统
 server {
     listen 8080 default_server;
     listen [::]:8080 default_server;
@@ -882,12 +898,10 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
-}
-EOF
+}"
                 else
                     # 使用域名配置，但在端口 8080 上
-                    cat > /etc/nginx/sites-available/default << EOF
-# 资产管理系统
+                    CONFIG_CONTENT="# 资产管理系统
 server {
     listen 8080;
     listen [::]:8080;
@@ -914,8 +928,18 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
-}
-EOF
+}"
+                fi
+
+                # 根据 Nginx 配置结构选择正确的路径
+                if [ "$NGINX_USES_SITES_ENABLED" = true ]; then
+                    # 使用 sites-available/sites-enabled 结构
+                    echo "$CONFIG_CONTENT" > /etc/nginx/sites-available/default
+                    log_info "Nginx 配置已写入 /etc/nginx/sites-available/default"
+                else
+                    # 使用 conf.d 结构
+                    echo "$CONFIG_CONTENT" > /etc/nginx/conf.d/default.conf
+                    log_info "Nginx 配置已写入 /etc/nginx/conf.d/default.conf"
                 fi
 
                 # 检查配置是否有语法错误
