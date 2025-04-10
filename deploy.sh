@@ -671,80 +671,79 @@ EOF
     if [ "$EXISTING_CADDY_CONFIG" = true ]; then
         log_info "使用现有 Caddy 配置并添加资产管理系统"
     else
+        # 检查端口 80 是否被占用
+        log_info "检查端口 80 是否被占用..."
+        PORT_80_PID=$(lsof -t -i:80 2>/dev/null)
 
-    # 检查端口 80 是否被占用
-    log_info "检查端口 80 是否被占用..."
-    PORT_80_PID=$(lsof -t -i:80 2>/dev/null)
+        if [ ! -z "$PORT_80_PID" ]; then
+            log_warning "端口 80 已被进程 ID $PORT_80_PID 占用"
 
-    if [ ! -z "$PORT_80_PID" ]; then
-        log_warning "端口 80 已被进程 ID $PORT_80_PID 占用"
+            # 检查是否是 Nginx
+            if systemctl is-active --quiet nginx; then
+                log_warning "Nginx 正在运行并占用端口 80"
 
-        # 检查是否是 Nginx
-        if systemctl is-active --quiet nginx; then
-            log_warning "Nginx 正在运行并占用端口 80"
-
-            if [ "$QUICK_DEPLOY" = true ]; then
-                log_info "快速部署模式: 自动停止 Nginx"
-                systemctl stop nginx
-                log_success "Nginx 已停止"
-            else
-                read -p "是否停止 Nginx 以释放端口 80? (y/n): " confirm
-                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                if [ "$QUICK_DEPLOY" = true ]; then
+                    log_info "快速部署模式: 自动停止 Nginx"
                     systemctl stop nginx
                     log_success "Nginx 已停止"
                 else
-                    log_warning "继续部署，但 Caddy 可能无法启动"
+                    read -p "是否停止 Nginx 以释放端口 80? (y/n): " confirm
+                    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                        systemctl stop nginx
+                        log_success "Nginx 已停止"
+                    else
+                        log_warning "继续部署，但 Caddy 可能无法启动"
+                    fi
                 fi
-            fi
-        else
-            # 其他进程占用端口 80
-            PROCESS_NAME=$(ps -p $PORT_80_PID -o comm=)
-            log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 正在占用端口 80"
-
-            if [ "$QUICK_DEPLOY" = true ]; then
-                log_info "快速部署模式: 尝试终止占用端口 80 的进程"
-                kill $PORT_80_PID
-                sleep 2
-                log_info "已尝试终止进程"
             else
-                read -p "是否终止该进程以释放端口 80? (y/n): " confirm
-                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                # 其他进程占用端口 80
+                PROCESS_NAME=$(ps -p $PORT_80_PID -o comm=)
+                log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 正在占用端口 80"
+
+                if [ "$QUICK_DEPLOY" = true ]; then
+                    log_info "快速部署模式: 尝试终止占用端口 80 的进程"
                     kill $PORT_80_PID
                     sleep 2
                     log_info "已尝试终止进程"
                 else
-                    log_warning "继续部署，但 Caddy 可能无法启动"
+                    read -p "是否终止该进程以释放端口 80? (y/n): " confirm
+                    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                        kill $PORT_80_PID
+                        sleep 2
+                        log_info "已尝试终止进程"
+                    else
+                        log_warning "继续部署，但 Caddy 可能无法启动"
+                    fi
                 fi
             fi
-        fi
-    else
-        log_success "端口 80 可用"
-    fi
-
-    # 询问是否配置域名
-    DOMAIN_NAME=""
-    if [ "$QUICK_DEPLOY" != true ]; then
-        echo ""
-        log_info "域名配置"
-        echo "----------------------------------------"
-        echo "您可以为资产管理系统配置域名，这将启用 HTTPS"
-        echo "如果不配置域名，将使用服务器 IP 地址访问系统"
-        echo "----------------------------------------"
-        read -p "是否配置域名? (y/n): " confirm
-        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
-            log_info "已设置域名: $DOMAIN_NAME"
         else
-            log_info "不使用域名，将使用 IP 地址访问"
+            log_success "端口 80 可用"
         fi
-        echo ""
-    fi
 
-    # 创建 Caddy 配置文件
-    log_info "创建 Caddy 配置文件..."
-    if [ -z "$DOMAIN_NAME" ]; then
-        # 使用 IP 配置
-        cat > /etc/caddy/Caddyfile << EOF
+        # 询问是否配置域名
+        DOMAIN_NAME=""
+        if [ "$QUICK_DEPLOY" != true ]; then
+            echo ""
+            log_info "域名配置"
+            echo "----------------------------------------"
+            echo "您可以为资产管理系统配置域名，这将启用 HTTPS"
+            echo "如果不配置域名，将使用服务器 IP 地址访问系统"
+            echo "----------------------------------------"
+            read -p "是否配置域名? (y/n): " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
+                log_info "已设置域名: $DOMAIN_NAME"
+            else
+                log_info "不使用域名，将使用 IP 地址访问"
+            fi
+            echo ""
+        fi
+
+        # 创建 Caddy 配置文件
+        log_info "创建 Caddy 配置文件..."
+        if [ -z "$DOMAIN_NAME" ]; then
+            # 使用 IP 配置
+            cat > /etc/caddy/Caddyfile << EOF
 :80 {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -758,9 +757,9 @@ EOF
     encode gzip
 }
 EOF
-    else
-        # 使用域名配置 (自动 HTTPS)
-        cat > /etc/caddy/Caddyfile << EOF
+        else
+            # 使用域名配置 (自动 HTTPS)
+            cat > /etc/caddy/Caddyfile << EOF
 $DOMAIN_NAME {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -774,35 +773,35 @@ $DOMAIN_NAME {
     encode gzip
 }
 EOF
-    fi
-
-    # 重启 Caddy
-    log_info "重启 Caddy..."
-    if systemctl is-active --quiet caddy; then
-        systemctl reload caddy
-        if [ $? -ne 0 ]; then
-            log_info "重新加载失败，尝试重启 Caddy..."
-            systemctl restart caddy
         fi
-    else
-        systemctl start caddy
-    fi
 
-    if [ $? -ne 0 ]; then
-        log_error "启动 Caddy 失败"
-        log_warning "可能是端口 80 仍然被占用。尝试使用其他端口..."
-
-        # 尝试使用其他端口
-        log_info "尝试使用端口 8080..."
-
-        if [ "$EXISTING_CADDY_CONFIG" = true ]; then
-            # 如果使用现有配置，则不修改配置文件
-            log_warning "使用现有配置，无法自动切换端口。请手动修改 Caddy 配置。"
+        # 重启 Caddy
+        log_info "重启 Caddy..."
+        if systemctl is-active --quiet caddy; then
+            systemctl reload caddy
+            if [ $? -ne 0 ]; then
+                log_info "重新加载失败，尝试重启 Caddy..."
+                systemctl restart caddy
+            fi
         else
-            # 修改配置文件使用端口 8080
-            if [ -z "$DOMAIN_NAME" ]; then
-                # 使用 IP 配置
-                cat > /etc/caddy/Caddyfile << EOF
+            systemctl start caddy
+        fi
+
+        if [ $? -ne 0 ]; then
+            log_error "启动 Caddy 失败"
+            log_warning "可能是端口 80 仍然被占用。尝试使用其他端口..."
+
+            # 尝试使用其他端口
+            log_info "尝试使用端口 8080..."
+
+            if [ "$EXISTING_CADDY_CONFIG" = true ]; then
+                # 如果使用现有配置，则不修改配置文件
+                log_warning "使用现有配置，无法自动切换端口。请手动修改 Caddy 配置。"
+            else
+                # 修改配置文件使用端口 8080
+                if [ -z "$DOMAIN_NAME" ]; then
+                    # 使用 IP 配置
+                    cat > /etc/caddy/Caddyfile << EOF
 :8080 {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -816,9 +815,9 @@ EOF
     encode gzip
 }
 EOF
-            else
-                # 使用域名配置，但在端口 8080 上
-                cat > /etc/caddy/Caddyfile << EOF
+                else
+                    # 使用域名配置，但在端口 8080 上
+                    cat > /etc/caddy/Caddyfile << EOF
 $DOMAIN_NAME:8080 {
     # 允许所有访问
     header Access-Control-Allow-Origin *
@@ -832,36 +831,37 @@ $DOMAIN_NAME:8080 {
     encode gzip
 }
 EOF
-            fi
+                fi
 
-            systemctl restart caddy
-            if [ $? -ne 0 ]; then
-                log_error "即使使用端口 8080 也无法启动 Caddy"
-                log_warning "继续部署过程，但前端可能无法访问"
-            else
-                log_success "Caddy 已在端口 8080 上启动"
-                log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+                systemctl restart caddy
+                if [ $? -ne 0 ]; then
+                    log_error "即使使用端口 8080 也无法启动 Caddy"
+                    log_warning "继续部署过程，但前端可能无法访问"
+                else
+                    log_success "Caddy 已在端口 8080 上启动"
+                    log_info "请使用 http://YOUR_SERVER_IP:8080 访问前端"
+                fi
             fi
         fi
-    fi
 
-    # 设置正确的文件权限
-    log_info "设置文件权限..."
-    chown -R caddy:caddy $FRONTEND_DIST
-    chmod -R 755 $FRONTEND_DIST
+        # 设置正确的文件权限
+        log_info "设置文件权限..."
+        chown -R caddy:caddy $FRONTEND_DIST
+        chmod -R 755 $FRONTEND_DIST
 
-    # 检查 Caddy 是否运行
-    if ! systemctl is-active --quiet caddy; then
-        log_error "Caddy 服务未运行"
-        log_info "尝试手动启动 Caddy..."
-        caddy run --config /etc/caddy/Caddyfile &
+        # 检查 Caddy 是否运行
+        if ! systemctl is-active --quiet caddy; then
+            log_error "Caddy 服务未运行"
+            log_info "尝试手动启动 Caddy..."
+            caddy run --config /etc/caddy/Caddyfile &
+        fi
     fi
 
     log_success "前端部署完成"
 
     # 返回上级目录
     cd ..
-fi
+}
 
 # 创建备份脚本
 create_backup_script() {
