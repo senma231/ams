@@ -1040,23 +1040,35 @@ EOF
         DOMAIN_NAME=""
         # 即使在快速部署模式下，也要询问域名配置
         echo ""
-        log_info "域名配置"
-        echo "----------------------------------------"
-        log_warning "重要提醒：域名配置是必要的步骤，不能跳过此步骤"
-        log_warning "即使在快速部署模式下，也必须配置域名"
-        echo "您可以为资产管理系统配置域名"
-        echo "如果不配置域名，将使用服务器 IP 地址访问系统"
-        echo "----------------------------------------"
+        echo "============================================"
+        echo -e "${RED}域名配置 - 必要步骤${NC}"
+        echo "============================================"
+        log_warning "请注意：域名配置是必要的步骤，不能跳过此步骤"
+        log_warning "即使在快速部署模式下，也必须回答此问题"
+        echo ""
+        echo "选项 1: 配置域名 (推荐，使用域名访问系统)"
+        echo "选项 2: 不配置域名 (使用服务器 IP 地址访问系统)"
+        echo "============================================"
 
-        # 即使在快速部署模式下，也要询问域名配置
-        # 这里特意不检查 QUICK_DEPLOY 变量
-        read -p "是否配置域名? (y/n): " confirm
-        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
-            log_info "已设置域名: $DOMAIN_NAME"
-        else
-            log_info "不使用域名，将使用 IP 地址访问"
-        fi
+        # 强制用户做出选择，不接受空输入
+        while true; do
+            read -p "请选择 (1/2): " domain_option
+            if [ "$domain_option" = "1" ]; then
+                read -p "请输入域名 (例如: example.com): " DOMAIN_NAME
+                if [ -z "$DOMAIN_NAME" ]; then
+                    log_error "域名不能为空，请重新输入"
+                    continue
+                fi
+                log_success "已设置域名: $DOMAIN_NAME"
+                break
+            elif [ "$domain_option" = "2" ]; then
+                log_warning "您选择不配置域名，将使用 IP 地址访问系统"
+                DOMAIN_NAME=""
+                break
+            else
+                log_error "无效选项，请输入 1 或 2"
+            fi
+        done
         echo ""
 
         # 创建 Nginx 配置文件
