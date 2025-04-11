@@ -88,21 +88,49 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/senma231/ams/master
 
 此脚本将自动：
 - 从 GitHub 拉取项目
-- 安装所有必要的依赖（Node.js、PM2、SQLite、Caddy）
-- 检查并处理端口冲突（如端口 80 被占用）
-- 支持域名配置（可选）并自动启用 HTTPS
+- 安装所有必要的依赖（Node.js、PM2、SQLite、Nginx）
+- 检查并处理端口冲突（如端口 3000 被占用）
+- 支持域名配置（可选）
 - 配置并启动前端和后端服务
 - 设置定期备份
 
-部署完成后，您可以通过服务器公网 IP 地址访问系统。如果端口 80 被占用，脚本会自动切换到端口 8080。如果配置了域名，Caddy 将自动申请和配置 SSL 证书。
+部署完成后，您可以通过服务器公网 IP 地址访问系统。如果端口 80 被占用，脚本会自动切换到端口 8080。
 
-#### 为什么选择 Caddy
+### 清理脚本
 
-我们选择 Caddy 作为 Web 服务器，因为它：
-- 自动配置 HTTPS（自动申请和更新 SSL 证书）
-- 配置简单直观，几行代码即可完成设置
-- 内置反向代理、静态文件服务等功能
-- 默认配置更安全，减少配置错误
+如果您需要清理现有部署或解决端口冲突问题，可以使用清理脚本：
+
+```bash
+# 下载清理脚本
+sudo curl -fsSL https://raw.githubusercontent.com/senma231/ams/master/clean_deployment.sh -o clean_deployment.sh
+sudo chmod +x clean_deployment.sh
+
+# 基本清理（保留项目文件）
+sudo ./clean_deployment.sh
+
+# 完全清理（删除项目目录）
+sudo ./clean_deployment.sh --full-clean
+```
+
+清理脚本将执行以下操作：
+
+1. **停止现有服务**
+   - 停止并删除运行中的后端服务
+
+2. **备份重要数据**
+   - 备份数据库文件
+   - 备份上传的文件
+   - 备份环境配置文件
+
+3. **清理Nginx配置**
+   - 备份并清理Nginx配置文件
+   - 重启Nginx服务
+
+4. **清理项目目录**（可选）
+   - 只有在使用`--full-clean`参数时才执行
+   - 完全删除项目目录
+
+清理完成后，您可以使用部署脚本重新部署项目。
 
 ### 手动部署
 
