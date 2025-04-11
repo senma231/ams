@@ -10,6 +10,10 @@ set -e
 GITHUB_REPO="https://github.com/senma231/ams.git"
 PROJECT_NAME="ams"
 
+# 项目安装路径
+# 不在 root 目录下安装，避免权限问题
+INSTALL_DIR="/var/www"
+
 # 部署模式
 # 如果设置为 true，将跳过所有确认提示，自动安装或更新所有组件
 QUICK_DEPLOY=false
@@ -581,7 +585,8 @@ deploy_backend() {
             STATUS_ROUTE='
 // 获取认证状态
 router.get("/status", (req, res) => {
-  const token = req.headers.authorization?.split(" ")[1];
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.split(" ")[1] : null;
 
   if (!token) {
     return res.status(401).json({
@@ -945,6 +950,10 @@ EOF
         log_info "创建 Nginx 配置文件..."
 
         # 准备配置内容
+        # 使用安装目录中的项目路径
+        PROJECT_PATH="$INSTALL_DIR/$PROJECT_NAME"
+        FRONTEND_DIST="$PROJECT_PATH/frontend/dist"
+
         if [ -z "$DOMAIN_NAME" ]; then
             # 使用 IP 配置
             CONFIG_CONTENT="# 资产管理系统
@@ -962,6 +971,9 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 
@@ -972,6 +984,8 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
+    add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS, PUT, DELETE';
+    add_header Access-Control-Allow-Headers 'DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization';
 }"
         else
             # 使用域名配置
@@ -992,6 +1006,9 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 
@@ -1002,6 +1019,8 @@ server {
 
     # 允许跨域请求
     add_header Access-Control-Allow-Origin *;
+    add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS, PUT, DELETE';
+    add_header Access-Control-Allow-Headers 'DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization';
 }"
         fi
 
@@ -1310,9 +1329,29 @@ trap cleanup EXIT
 clone_repository() {
     log_info "从 GitHub 拉取项目..."
 
+    # 创建安装目录
+    if [ ! -d "$INSTALL_DIR" ]; then
+        log_info "创建安装目录 $INSTALL_DIR..."
+        mkdir -p "$INSTALL_DIR"
+        if [ $? -ne 0 ]; then
+            log_error "创建安装目录失败"
+            exit 1
+        fi
+    fi
+
+    # 设置正确的权限
+    log_info "设置安装目录权限..."
+    chmod 755 "$INSTALL_DIR"
+
+    # 进入安装目录
+    cd "$INSTALL_DIR"
+
+    # 完整的项目路径
+    PROJECT_PATH="$INSTALL_DIR/$PROJECT_NAME"
+
     # 检查目标目录是否存在
     if [ -d "$PROJECT_NAME" ]; then
-        log_warning "目录 $PROJECT_NAME 已存在"
+        log_warning "目录 $PROJECT_PATH 已存在"
         if [ "$QUICK_DEPLOY" = true ]; then
             log_info "快速部署模式: 自动更新现有目录"
             cd "$PROJECT_NAME"
@@ -1337,7 +1376,7 @@ clone_repository() {
     fi
 
     # 克隆仓库
-    log_info "克隆仓库 $GITHUB_REPO..."
+    log_info "克隆仓库 $GITHUB_REPO 到 $PROJECT_PATH..."
     git clone "$GITHUB_REPO" "$PROJECT_NAME"
 
     if [ $? -ne 0 ]; then
@@ -1345,7 +1384,20 @@ clone_repository() {
         exit 1
     fi
 
+    # 设置项目目录权限
+    log_info "设置项目目录权限..."
+    chmod -R 755 "$PROJECT_NAME"
+
+    # 如果有 www-data 用户，则设置为所有者
+    if getent group www-data &>/dev/null; then
+        log_info "设置项目所有者为 www-data..."
+        chown -R www-data:www-data "$PROJECT_NAME"
+    fi
+
     log_success "仓库克隆成功"
+
+    # 返回原始目录
+    cd -
 }
 
 # 主函数
@@ -1382,7 +1434,7 @@ main() {
     clone_repository
 
     # 进入项目目录
-    cd "$PROJECT_NAME"
+    cd "$INSTALL_DIR/$PROJECT_NAME"
 
     # 安装 Node.js
     install_nodejs

@@ -107,7 +107,8 @@ router.get('/generate-hash/:password', async (req, res) => {
 
 // 获取认证状态
 router.get('/status', (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.split(' ')[1] : null;
 
   if (!token) {
     return res.status(401).json({
