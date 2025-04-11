@@ -552,6 +552,82 @@ check_nginx() {
     fi
 }
 
+# 检查端口是否被占用的函数
+check_port() {
+    local port=$1
+    log_info "检查端口 $port 是否可用..."
+
+    # 尝试使用 lsof 检查端口
+    if command -v lsof &> /dev/null; then
+        if lsof -i:$port -P -n | grep LISTEN &> /dev/null; then
+            log_warning "端口 $port 已被占用"
+            return 1
+        fi
+    # 如果没有 lsof，尝试使用 netstat
+    elif command -v netstat &> /dev/null; then
+        if netstat -tuln | grep ":$port " &> /dev/null; then
+            log_warning "端口 $port 已被占用"
+            return 1
+        fi
+    # 如果没有 netstat，尝试使用 ss
+    elif command -v ss &> /dev/null; then
+        if ss -tuln | grep ":$port " &> /dev/null; then
+            log_warning "端口 $port 已被占用"
+            return 1
+        fi
+    # 如果以上工具都没有，尝试直接使用 TCP 连接测试
+    else
+        # 创建一个临时脚本来测试端口
+        cat > /tmp/port_check.js << EOF
+const net = require('net');
+const server = net.createServer();
+server.once('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    process.exit(1);
+  }
+});
+server.once('listening', () => {
+  server.close();
+  process.exit(0);
+});
+server.listen($port);
+EOF
+
+        # 执行脚本
+        if ! node /tmp/port_check.js; then
+            log_warning "端口 $port 已被占用"
+            rm /tmp/port_check.js
+            return 1
+        fi
+        rm /tmp/port_check.js
+    fi
+
+    log_success "端口 $port 可用"
+    return 0
+}
+
+# 查找可用端口
+find_available_port() {
+    local start_port=$1
+    local current_port=$start_port
+    local max_attempts=10
+
+    log_info "查找可用端口，从 $start_port 开始..."
+
+    while [ $max_attempts -gt 0 ]; do
+        if check_port $current_port; then
+            log_success "找到可用端口: $current_port"
+            echo $current_port
+            return 0
+        fi
+        current_port=$((current_port + 1))
+        max_attempts=$((max_attempts - 1))
+    done
+
+    log_error "无法找到可用端口"
+    return 1
+}
+
 # 部署后端
 deploy_backend() {
     log_info "部署后端..."
@@ -652,6 +728,42 @@ router.get("/status", (req, res) => {
         log_error "找不到认证路由文件: $AUTH_ROUTE"
     fi
 
+    # 检查默认端口是否可用
+    DEFAULT_PORT=3000
+    BACKEND_PORT=$DEFAULT_PORT
+
+    if ! check_port $DEFAULT_PORT; then
+        log_warning "默认端口 $DEFAULT_PORT 已被占用，尝试查找可用端口..."
+        BACKEND_PORT=$(find_available_port $((DEFAULT_PORT + 1)))
+
+        if [ $? -ne 0 ]; then
+            log_error "无法找到可用端口，后端部署失败"
+            exit 1
+        fi
+
+        # 创建或更新 .env 文件以使用新端口
+        log_info "更新环境配置以使用端口 $BACKEND_PORT..."
+        if [ -f ".env" ]; then
+            # 如果 .env 文件存在，更新 PORT
+            if grep -q "^PORT=" ".env"; then
+                sed -i "s/^PORT=.*/PORT=$BACKEND_PORT/" ".env"
+            else
+                echo "PORT=$BACKEND_PORT" >> ".env"
+            fi
+        else
+            # 如果 .env 文件不存在，创建一个新的
+            echo "PORT=$BACKEND_PORT" > ".env"
+        fi
+
+        # 记录实际使用的端口，以便 Nginx 配置使用
+        echo $BACKEND_PORT > ".actual_port"
+        log_success "后端将使用端口 $BACKEND_PORT"
+    else
+        # 记录使用的是默认端口
+        echo $BACKEND_PORT > ".actual_port"
+        log_success "后端将使用默认端口 $BACKEND_PORT"
+    fi
+
     # 检查是否已经有运行的实例
     if pm2 list | grep -q "asset-management-backend"; then
         log_info "停止现有的后端实例..."
@@ -661,7 +773,8 @@ router.get("/status", (req, res) => {
 
     # 使用 PM2 启动应用
     log_info "启动后端应用..."
-    pm2 start src/app.js --name "asset-management-backend"
+    # 使用环境变量指定端口
+    PORT=$BACKEND_PORT pm2 start src/app.js --name "asset-management-backend"
     if [ $? -ne 0 ]; then
         log_error "启动后端应用失败"
         exit 1
@@ -671,7 +784,7 @@ router.get("/status", (req, res) => {
     pm2 save
     pm2 startup
 
-    log_success "后端部署完成"
+    log_success "后端部署完成，使用端口: $BACKEND_PORT"
 
     # 返回上级目录
     cd ..
@@ -954,6 +1067,17 @@ EOF
         PROJECT_PATH="$INSTALL_DIR/$PROJECT_NAME"
         FRONTEND_DIST="$PROJECT_PATH/frontend/dist"
 
+        # 检查后端实际使用的端口
+        BACKEND_PORT=3000
+        ACTUAL_PORT_FILE="$PROJECT_PATH/backend/.actual_port"
+
+        if [ -f "$ACTUAL_PORT_FILE" ]; then
+            BACKEND_PORT=$(cat "$ACTUAL_PORT_FILE")
+            log_info "检测到后端实际使用的端口: $BACKEND_PORT"
+        else
+            log_warning "找不到后端端口配置文件，使用默认端口: $BACKEND_PORT"
+        fi
+
         if [ -z "$DOMAIN_NAME" ]; then
             # 使用 IP 配置
             CONFIG_CONTENT="# 资产管理系统
@@ -966,7 +1090,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:$BACKEND_PORT/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1001,7 +1125,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:$BACKEND_PORT/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1099,7 +1223,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:$BACKEND_PORT/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1129,7 +1253,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:$BACKEND_PORT/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';

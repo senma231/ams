@@ -59,3 +59,4 @@ docs/github-upload.md
 clean_caddy.sh
 image.png
 vps_log.md
+deploy_port_fix.sh
