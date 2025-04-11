@@ -989,52 +989,140 @@ EOF
     else
         # 检查端口 80 是否被占用
         log_info "检查端口 80 是否被占用..."
-        PORT_80_PID=$(lsof -t -i:80 2>/dev/null)
+        PORT_80_OCCUPIED=false
+        PORT_80_PID=""
 
-        if [ ! -z "$PORT_80_PID" ]; then
-            log_warning "端口 80 已被进程 ID $PORT_80_PID 占用"
+        # 使用多种方法检查端口是否被占用
+        if command -v lsof &> /dev/null; then
+            log_info "使用 lsof 检查端口 80..."
+            PORT_80_PID=$(lsof -t -i:80 2>/dev/null)
+            if [ ! -z "$PORT_80_PID" ]; then
+                PORT_80_OCCUPIED=true
+            fi
+        elif command -v netstat &> /dev/null; then
+            log_info "使用 netstat 检查端口 80..."
+            if netstat -tuln | grep -q ":80 "; then
+                PORT_80_OCCUPIED=true
+                # 尝试获取进程 ID
+                PORT_80_PID=$(netstat -tuln | grep ":80 " | awk '{print $7}' | cut -d'/' -f1)
+            fi
+        elif command -v ss &> /dev/null; then
+            log_info "使用 ss 检查端口 80..."
+            if ss -tuln | grep -q ":80 "; then
+                PORT_80_OCCUPIED=true
+            fi
+        else
+            log_warning "无法检查端口 80，假设端口可用"
+        fi
+
+        if [ "$PORT_80_OCCUPIED" = true ]; then
+            log_warning "端口 80 已被占用"
+            if [ ! -z "$PORT_80_PID" ]; then
+                log_warning "进程 ID: $PORT_80_PID"
+            fi
 
             # 检查是否是其他 Web 服务器
-            if systemctl is-active --quiet caddy; then
-                log_warning "Caddy 正在运行并占用端口 80"
+            WEB_SERVER_FOUND=false
+
+            # 检查其他可能的 Web 服务器
+            # 检查是否有其他 Nginx 实例在运行
+            if command -v systemctl &> /dev/null && systemctl is-active --quiet nginx; then
+                log_warning "另一个 Nginx 实例正在运行并可能占用端口 80"
+                WEB_SERVER_FOUND=true
 
                 if [ "$QUICK_DEPLOY" = true ]; then
-                    log_info "快速部署模式: 自动停止 Caddy"
-                    systemctl stop caddy
-                    log_success "Caddy 已停止"
+                    log_info "快速部署模式: 尝试重启 Nginx"
+                    systemctl restart nginx || true
+                    log_info "Nginx 已尝试重启"
                 else
-                    read -p "是否停止 Caddy 以释放端口 80? (y/n): " confirm
+                    read -p "是否重启 Nginx 以释放端口 80? (y/n): " confirm
                     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                        systemctl stop caddy
-                        log_success "Caddy 已停止"
-                    else
-                        log_warning "继续部署，但 Nginx 可能无法启动"
-                    fi
-                fi
-            else
-                # 其他进程占用端口 80
-                PROCESS_NAME=$(ps -p $PORT_80_PID -o comm= 2>/dev/null || echo "unknown")
-                log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 正在占用端口 80"
-
-                if [ "$QUICK_DEPLOY" = true ]; then
-                    log_info "快速部署模式: 尝试终止占用端口 80 的进程"
-                    kill $PORT_80_PID
-                    sleep 2
-                    log_info "已尝试终止进程"
-                else
-                    read -p "是否终止该进程以释放端口 80? (y/n): " confirm
-                    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                        kill $PORT_80_PID
-                        sleep 2
-                        log_info "已尝试终止进程"
+                        systemctl restart nginx || true
+                        log_info "Nginx 已尝试重启"
                     else
                         log_warning "继续部署，但 Nginx 可能无法启动"
                     fi
                 fi
             fi
+
+            # 检查 Apache
+            if ! $WEB_SERVER_FOUND && command -v systemctl &> /dev/null && systemctl is-active --quiet apache2; then
+                log_warning "Apache 正在运行并可能占用端口 80"
+                WEB_SERVER_FOUND=true
+
+                if [ "$QUICK_DEPLOY" = true ]; then
+                    log_info "快速部署模式: 尝试停止 Apache"
+                    systemctl stop apache2 || true
+                    log_info "Apache 已尝试停止"
+                else
+                    read -p "是否停止 Apache 以释放端口 80? (y/n): " confirm
+                    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                        systemctl stop apache2 || true
+                        log_info "Apache 已尝试停止"
+                    else
+                        log_warning "继续部署，但 Nginx 可能无法启动"
+                    fi
+                fi
+            fi
+
+            # 如果没有找到已知的 Web 服务器，尝试获取进程信息
+            if ! $WEB_SERVER_FOUND && [ ! -z "$PORT_80_PID" ]; then
+                if command -v ps &> /dev/null; then
+                    PROCESS_NAME=$(ps -p $PORT_80_PID -o comm= 2>/dev/null || echo "unknown")
+                    log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 可能占用端口 80"
+
+                    if [ "$QUICK_DEPLOY" = true ]; then
+                        log_info "快速部署模式: 尝试终止占用端口 80 的进程"
+                        kill $PORT_80_PID 2>/dev/null || true
+                        sleep 2
+                        log_info "已尝试终止进程"
+                    else
+                        read -p "是否终止该进程以释放端口 80? (y/n): " confirm
+                        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                            kill $PORT_80_PID 2>/dev/null || true
+                            sleep 2
+                            log_info "已尝试终止进程"
+                        else
+                            log_warning "继续部署，但 Nginx 可能无法启动"
+                        fi
+                    fi
+                else
+                    log_warning "无法获取进程信息，继续部署，但 Nginx 可能无法启动"
+                fi
+            fi
+
+            # 再次检查端口是否可用
+            log_info "再次检查端口 80 是否可用..."
+            PORT_80_STILL_OCCUPIED=false
+
+            if command -v lsof &> /dev/null; then
+                if lsof -i:80 -P -n | grep LISTEN &> /dev/null; then
+                    PORT_80_STILL_OCCUPIED=true
+                fi
+            elif command -v netstat &> /dev/null; then
+                if netstat -tuln | grep -q ":80 "; then
+                    PORT_80_STILL_OCCUPIED=true
+                fi
+            elif command -v ss &> /dev/null; then
+                if ss -tuln | grep -q ":80 "; then
+                    PORT_80_STILL_OCCUPIED=true
+                fi
+            fi
+
+            if [ "$PORT_80_STILL_OCCUPIED" = true ]; then
+                log_warning "端口 80 仍然被占用，将使用端口 8080 作为备用端口"
+                USE_ALT_PORT=true
+            else
+                log_success "端口 80 现在可用"
+                USE_ALT_PORT=false
+            fi
         else
             log_success "端口 80 可用"
+            USE_ALT_PORT=false
         fi
+
+        log_info "端口检查完成，继续配置..."
+
 
         # 询问是否配置域名
         DOMAIN_NAME=""
@@ -1537,16 +1625,38 @@ clone_repository() {
 }
 
 # 主函数
+# 清理函数
+cleanup() {
+    log_info "正在清理..."
+    # 如果有临时文件需要清理，可以在这里添加
+}
+
+# 错误处理
+handle_error() {
+    local exit_code=$1
+    local error_message=$2
+    local step=$3
+
+    log_error "在步骤 '$step' 中出错: $error_message (退出代码: $exit_code)"
+    cleanup
+    log_info "部署结束时间: $(date)"
+    log_info "日志文件保存在: $LOG_FILE"
+    exit $exit_code
+}
+
 main() {
     echo "========================================"
     echo "资产管理系统部署脚本"
     echo "========================================"
 
+    # 设置错误处理
+    trap 'handle_error $? "Unexpected error" "Unknown"' ERR
+
     # 检查是否以 root 权限运行
-    check_root
+    check_root || handle_error $? "Root check failed" "check_root"
 
     # 检测操作系统
-    detect_os
+    detect_os || handle_error $? "OS detection failed" "detect_os"
 
     # 检查是否使用快速部署模式
     if [ "$1" = "--quick" ] || [ "$1" = "-q" ]; then
@@ -1561,45 +1671,57 @@ main() {
     fi
 
     # 更新系统包
-    update_system
+    update_system || handle_error $? "System update failed" "update_system"
 
     # 安装基本依赖
-    install_basic_deps
+    install_basic_deps || handle_error $? "Basic dependencies installation failed" "install_basic_deps"
 
     # 从 GitHub 拉取项目
-    clone_repository
+    clone_repository || handle_error $? "Repository cloning failed" "clone_repository"
 
     # 进入项目目录
-    cd "$INSTALL_DIR/$PROJECT_NAME"
+    cd "$INSTALL_DIR/$PROJECT_NAME" || handle_error $? "Failed to enter project directory" "cd"
 
     # 安装 Node.js
-    install_nodejs
+    install_nodejs || handle_error $? "Node.js installation failed" "install_nodejs"
 
     # 安装 npm
-    install_npm
+    install_npm || handle_error $? "npm installation failed" "install_npm"
 
     # 安装 PM2
-    install_pm2
+    install_pm2 || handle_error $? "PM2 installation failed" "install_pm2"
 
     # 安装 SQLite
-    install_sqlite
+    install_sqlite || handle_error $? "SQLite installation failed" "install_sqlite"
 
     # 安装 Nginx
-    check_nginx
+    check_nginx || handle_error $? "Nginx installation failed" "check_nginx"
 
     # 部署后端
-    deploy_backend
+    log_info "开始部署后端..."
+    deploy_backend || handle_error $? "Backend deployment failed" "deploy_backend"
+    log_success "后端部署完成"
 
     # 部署前端
-    deploy_frontend
+    log_info "开始部署前端..."
+    deploy_frontend || handle_error $? "Frontend deployment failed" "deploy_frontend"
+    log_success "前端部署完成"
 
     # 创建备份脚本
-    create_backup_script
+    log_info "创建备份脚本..."
+    create_backup_script || handle_error $? "Backup script creation failed" "create_backup_script"
+    log_success "备份脚本创建完成"
 
     # 显示部署信息
-    show_deployment_info
+    log_info "显示部署信息..."
+    show_deployment_info || handle_error $? "Showing deployment info failed" "show_deployment_info"
+
+    # 清理
+    cleanup
 
     log_success "部署完成！系统已准备就绪。"
+    log_info "部署结束时间: $(date)"
+    log_info "日志文件保存在: $LOG_FILE"
 }
 
 # 执行主函数
