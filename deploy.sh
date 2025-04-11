@@ -676,15 +676,60 @@ router.get("/status", (req, res) => {
 deploy_frontend() {
     log_info "部署前端..."
 
+    # 运行前端依赖修复脚本
+    if [ -f "fix_frontend.sh" ]; then
+        log_info "运行前端综合修复脚本..."
+        chmod +x fix_frontend.sh
+        ./fix_frontend.sh
+        if [ $? -ne 0 ]; then
+            log_warning "前端综合修复脚本运行失败，继续部署"
+        fi
+    elif [ -f "fix_frontend_deps.sh" ]; then
+        log_info "运行前端依赖修复脚本..."
+        chmod +x fix_frontend_deps.sh
+        ./fix_frontend_deps.sh
+        if [ $? -ne 0 ]; then
+            log_warning "前端依赖修复脚本运行失败，继续部署"
+        fi
+    elif [ -f "fix_vue_version.sh" ]; then
+        log_info "运行 Vue 版本修复脚本..."
+        chmod +x fix_vue_version.sh
+        ./fix_vue_version.sh
+        if [ $? -ne 0 ]; then
+            log_warning "Vue 版本修复脚本运行失败，继续部署"
+        fi
+    else
+        log_warning "未找到前端修复脚本，创建临时修复脚本"
+
+        # 创建临时修复脚本
+        cat > temp_fix.sh << 'EOF'
+#!/bin/bash
+cd frontend
+echo "legacy-peer-deps=true" > .npmrc
+if [ -f "package.json" ]; then
+    sed -i 's/"vue": "\^3\.4\.15"/"vue": "\^3\.2\.47"/' package.json
+    sed -i 's/"vue-echarts": "\^6\.6\.8"/"vue-echarts": "\^6\.5\.5"/' package.json
+fi
+cd ..
+EOF
+        chmod +x temp_fix.sh
+        ./temp_fix.sh
+        rm temp_fix.sh
+    fi
+
     # 进入前端目录
     cd frontend || { log_error "前端目录不存在"; exit 1; }
 
     # 安装依赖
     log_info "安装前端依赖..."
-    npm install
+    npm install --legacy-peer-deps
     if [ $? -ne 0 ]; then
-        log_error "安装前端依赖失败"
-        exit 1
+        log_warning "使用 --legacy-peer-deps 安装失败，尝试使用 --force"
+        npm install --force
+        if [ $? -ne 0 ]; then
+            log_error "安装前端依赖失败"
+            exit 1
+        fi
     fi
 
     # 构建生产版本
