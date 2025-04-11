@@ -716,7 +716,7 @@ EOF
                 fi
             else
                 # 其他进程占用端口 80
-                PROCESS_NAME=$(ps -p $PORT_80_PID -o comm=)
+                PROCESS_NAME=$(ps -p $PORT_80_PID -o comm= 2>/dev/null || echo "unknown")
                 log_warning "进程 '$PROCESS_NAME' (进程 ID: $PORT_80_PID) 正在占用端口 80"
 
                 if [ "$QUICK_DEPLOY" = true ]; then
@@ -731,7 +731,7 @@ EOF
                         sleep 2
                         log_info "已尝试终止进程"
                     else
-                        log_warning "继续部署，但 Caddy 可能无法启动"
+                        log_warning "继续部署，但 Nginx 可能无法启动"
                     fi
                 fi
             fi
