@@ -105,4 +105,51 @@ router.get('/generate-hash/:password', async (req, res) => {
   }
 });
 
+// 获取认证状态
+router.get('/status', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: '未提供认证令牌',
+      authenticated: false
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // 查找用户
+    db.get(
+      'SELECT id, username, name, role, branch FROM users WHERE id = ?',
+      [decoded.id],
+      (err, user) => {
+        if (err || !user) {
+          return res.status(401).json({
+            success: false,
+            message: '无效的认证令牌',
+            authenticated: false
+          });
+        }
+
+        res.json({
+          success: true,
+          message: '认证有效',
+          authenticated: true,
+          data: {
+            user
+          }
+        });
+      }
+    );
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      message: '无效的认证令牌',
+      authenticated: false
+    });
+  }
+});
+
 module.exports = router;

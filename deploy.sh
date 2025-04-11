@@ -137,9 +137,62 @@ install_basic_deps() {
 install_nodejs() {
     log_info "检查 Node.js..."
 
-    # 检查 Node.js 是否已安装
-    if command -v node &> /dev/null; then
-        NODE_VER=$(node -v | cut -d 'v' -f 2)
+    # 尝试多种方式检测 Node.js
+    NODE_PATHS=(
+        "node"
+        "/usr/bin/node"
+        "/usr/local/bin/node"
+        "$HOME/.nvm/versions/node/*/bin/node"
+        "/opt/node/bin/node"
+    )
+
+    NODE_FOUND=false
+    NODE_PATH=""
+    NODE_VER=""
+
+    for path in "${NODE_PATHS[@]}"; do
+        # 处理通配符路径
+        if [[ $path == *"*"* ]]; then
+            for expanded_path in $path; do
+                if [ -x "$expanded_path" ]; then
+                    NODE_PATH="$expanded_path"
+                    NODE_VER=$("$NODE_PATH" -v 2>/dev/null | cut -d 'v' -f 2)
+                    if [ $? -eq 0 ]; then
+                        NODE_FOUND=true
+                        break 2
+                    fi
+                fi
+            done
+        else
+            # 直接检查路径
+            if command -v $path &> /dev/null; then
+                NODE_PATH="$path"
+                NODE_VER=$(command -v $path &> /dev/null && $path -v 2>/dev/null | cut -d 'v' -f 2)
+                if [ $? -eq 0 ]; then
+                    NODE_FOUND=true
+                    break
+                fi
+            fi
+        fi
+    done
+
+    # 检查 NVM
+    if [ "$NODE_FOUND" = false ] && [ -f "$HOME/.nvm/nvm.sh" ]; then
+        log_info "检测到 NVM，尝试加载..."
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+        if command -v node &> /dev/null; then
+            NODE_PATH=$(command -v node)
+            NODE_VER=$(node -v 2>/dev/null | cut -d 'v' -f 2)
+            if [ $? -eq 0 ]; then
+                NODE_FOUND=true
+            fi
+        fi
+    fi
+
+    # 处理检测结果
+    if [ "$NODE_FOUND" = true ]; then
         log_info "检测到 Node.js 版本: $NODE_VER"
 
         # 检查版本是否满足要求
@@ -513,6 +566,87 @@ deploy_backend() {
     # 创建必要的目录
     mkdir -p data logs
 
+    # 检查认证路由是否完整
+    log_info "检查认证路由..."
+    AUTH_ROUTE="src/routes/auth.js"
+    if [ -f "$AUTH_ROUTE" ]; then
+        # 检查是否存在 status 路由
+        if ! grep -q "router.get.*status" "$AUTH_ROUTE"; then
+            log_warning "认证路由中缺少 status 路由，正在添加..."
+
+            # 备份原始文件
+            cp "$AUTH_ROUTE" "${AUTH_ROUTE}.bak"
+
+            # 在 module.exports 行之前添加 status 路由
+            STATUS_ROUTE='
+// 获取认证状态
+router.get("/status", (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: "未提供认证令牌",
+      authenticated: false
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // 查找用户
+    db.get(
+      "SELECT id, username, name, role, branch FROM users WHERE id = ?",
+      [decoded.id],
+      (err, user) => {
+        if (err || !user) {
+          return res.status(401).json({
+            success: false,
+            message: "无效的认证令牌",
+            authenticated: false
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "认证有效",
+          authenticated: true,
+          data: {
+            user
+          }
+        });
+      }
+    );
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      message: "无效的认证令牌",
+      authenticated: false
+    });
+  }
+});'
+
+            # 在 module.exports 行之前添加 status 路由
+            MODULE_EXPORTS_LINE=$(grep -n "module.exports" "$AUTH_ROUTE" | head -1 | cut -d: -f1)
+
+            if [ ! -z "$MODULE_EXPORTS_LINE" ]; then
+                # 使用 awk 添加 status 路由
+                awk -v line="$MODULE_EXPORTS_LINE" -v route="$STATUS_ROUTE" 'NR==line{print route}1' "$AUTH_ROUTE" > "${AUTH_ROUTE}.tmp"
+                mv "${AUTH_ROUTE}.tmp" "$AUTH_ROUTE"
+                log_success "status 路由添加成功"
+            else
+                log_warning "无法找到 module.exports 行，尝试在文件末尾添加"
+                # 在文件末尾添加 status 路由
+                echo "$STATUS_ROUTE" >> "$AUTH_ROUTE"
+                log_success "status 路由添加成功"
+            fi
+        else
+            log_success "认证路由已包含 status 路由"
+        fi
+    else
+        log_error "找不到认证路由文件: $AUTH_ROUTE"
+    fi
+
     # 检查是否已经有运行的实例
     if pm2 list | grep -q "asset-management-backend"; then
         log_info "停止现有的后端实例..."
@@ -745,6 +879,8 @@ EOF
         echo ""
         log_info "域名配置"
         echo "----------------------------------------"
+        log_warning "重要提醒：域名配置是必要的步骤，不能跳过此步骤"
+        log_warning "即使在快速部署模式下，也必须配置域名"
         echo "您可以为资产管理系统配置域名"
         echo "如果不配置域名，将使用服务器 IP 地址访问系统"
         echo "----------------------------------------"
@@ -856,6 +992,20 @@ server {
         if [ $? -ne 0 ]; then
             log_error "Nginx 配置有语法错误，请检查配置文件"
             exit 1
+        fi
+
+        # 设置文件权限
+        log_info "设置文件权限..."
+        chmod -R 755 "$FRONTEND_DIST"
+        if getent group www-data &>/dev/null; then
+            chown -R www-data:www-data "$FRONTEND_DIST"
+            log_success "已将所有者修改为 www-data:www-data"
+        elif getent group nginx &>/dev/null; then
+            chown -R nginx:nginx "$FRONTEND_DIST"
+            log_success "已将所有者修改为 nginx:nginx"
+        else
+            log_warning "找不到 www-data 或 nginx 用户组，尝试使用 nobody 用户..."
+            chown -R nobody:nobody "$FRONTEND_DIST" 2>/dev/null || true
         fi
 
         # 重启 Nginx 服务
