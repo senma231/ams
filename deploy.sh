@@ -644,7 +644,35 @@ deploy_backend() {
     fi
 
     # 创建必要的目录
-    mkdir -p data logs
+    mkdir -p data logs uploads
+
+    # 设置正确的目录权限
+    log_info "设置后端目录权限..."
+    # 对需要写入的目录设置更宽松的权限
+    chmod -R 777 data logs uploads
+    log_success "已将数据目录权限设置为 777"
+
+    # 初始化数据库
+    log_info "初始化数据库..."
+    if grep -q "init-db" package.json; then
+        log_info "使用 npm run init-db 初始化数据库..."
+        npm run init-db
+        if [ $? -ne 0 ]; then
+            log_warning "npm run init-db 失败，尝试其他方法..."
+        else
+            log_success "数据库初始化成功"
+        fi
+    elif [ -f "src/db/init.js" ]; then
+        log_info "使用 node src/db/init.js 初始化数据库..."
+        node src/db/init.js
+        if [ $? -ne 0 ]; then
+            log_warning "node src/db/init.js 失败，尝试其他方法..."
+        else
+            log_success "数据库初始化成功"
+        fi
+    else
+        log_warning "找不到数据库初始化脚本，可能需要手动初始化"
+    fi
 
     # 检查认证路由是否完整
     log_info "检查认证路由..."
@@ -773,16 +801,17 @@ router.get("/status", (req, res) => {
 
     # 使用 PM2 启动应用
     log_info "启动后端应用..."
+    # 使用 root 权限启动后端服务，确保文件访问权限一致
     # 使用环境变量指定端口
-    PORT=$BACKEND_PORT pm2 start src/app.js --name "asset-management-backend"
+    sudo PORT=$BACKEND_PORT pm2 start src/app.js --name "asset-management-backend"
     if [ $? -ne 0 ]; then
         log_error "启动后端应用失败"
         exit 1
     fi
 
-    # 设置开机自启
-    pm2 save
-    pm2 startup
+    # 设置开机自启，使用 root 权限
+    sudo pm2 save
+    sudo pm2 startup
 
     log_success "后端部署完成，使用端口: $BACKEND_PORT"
 
@@ -827,6 +856,8 @@ echo "legacy-peer-deps=true" > .npmrc
 if [ -f "package.json" ]; then
     sed -i 's/"vue": "\^3\.4\.15"/"vue": "\^3\.2\.47"/' package.json
     sed -i 's/"vue-echarts": "\^6\.6\.8"/"vue-echarts": "\^6\.5\.5"/' package.json
+    # 移除自引用依赖
+    sed -i '/"asset-management-frontend": "file:",/d' package.json
 fi
 cd ..
 EOF
@@ -917,6 +948,7 @@ EOF
 # 资产管理系统 - 子域名: $SUBDOMAIN
 server {
     listen 80;
+    # 移除 IPv6 监听指令
     server_name $SUBDOMAIN;
 
     root $(pwd)/dist;
@@ -924,7 +956,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -964,7 +996,7 @@ server {
     # API 反向代理
     location /$PATH_PREFIX/api/ {
         rewrite ^/$PATH_PREFIX/api/(.*) /\$1 break;
-        proxy_pass http://localhost:3000/;
+        proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1183,14 +1215,13 @@ EOF
             CONFIG_CONTENT="# 资产管理系统
 server {
     listen 80 default_server;
-    listen [::]:80 default_server;
 
     root $FRONTEND_DIST;
     index index.html;
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:$BACKEND_PORT/;
+        proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1216,7 +1247,6 @@ server {
             CONFIG_CONTENT="# 资产管理系统
 server {
     listen 80;
-    listen [::]:80;
 
     server_name $DOMAIN_NAME;
 
@@ -1225,7 +1255,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:$BACKEND_PORT/;
+        proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1282,18 +1312,16 @@ server {
             exit 1
         fi
 
-        # 设置文件权限
+        # 设置文件权限，使用 root 权限确保一致性
         log_info "设置文件权限..."
         chmod -R 755 "$FRONTEND_DIST"
-        if getent group www-data &>/dev/null; then
-            chown -R www-data:www-data "$FRONTEND_DIST"
-            log_success "已将所有者修改为 www-data:www-data"
-        elif getent group nginx &>/dev/null; then
-            chown -R nginx:nginx "$FRONTEND_DIST"
-            log_success "已将所有者修改为 nginx:nginx"
-        else
-            log_warning "找不到 www-data 或 nginx 用户组，尝试使用 nobody 用户..."
-            chown -R nobody:nobody "$FRONTEND_DIST" 2>/dev/null || true
+        chown -R root:root "$FRONTEND_DIST"
+        log_success "已将所有者修改为 root:root"
+
+        # 对需要写入的目录设置更宽松的权限
+        if [ -d "$FRONTEND_DIST/uploads" ]; then
+            chmod -R 777 "$FRONTEND_DIST/uploads"
+            log_success "已将 uploads 目录权限设置为 777"
         fi
 
         # 重启 Nginx 服务
@@ -1316,14 +1344,13 @@ server {
                     CONFIG_CONTENT="# 资产管理系统
 server {
     listen 8080 default_server;
-    listen [::]:8080 default_server;
 
     root $FRONTEND_DIST;
     index index.html;
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:$BACKEND_PORT/;
+        proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1344,7 +1371,6 @@ server {
                     CONFIG_CONTENT="# 资产管理系统
 server {
     listen 8080;
-    listen [::]:8080;
 
     server_name $DOMAIN_NAME;
 
@@ -1353,7 +1379,7 @@ server {
 
     # API 反向代理
     location /api/ {
-        proxy_pass http://localhost:$BACKEND_PORT/;
+        proxy_pass http://localhost:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -1400,14 +1426,16 @@ server {
             fi
         fi
 
-        # 设置正确的文件权限
+        # 设置正确的文件权限，使用 root 权限确保一致性
         log_info "设置文件权限..."
-        if getent group www-data &>/dev/null; then
-            chown -R www-data:www-data $FRONTEND_DIST
-        else
-            chown -R nginx:nginx $FRONTEND_DIST 2>/dev/null || true
-        fi
+        chown -R root:root $FRONTEND_DIST
         chmod -R 755 $FRONTEND_DIST
+
+        # 对需要写入的目录设置更宽松的权限
+        if [ -d "$FRONTEND_DIST/uploads" ]; then
+            chmod -R 777 "$FRONTEND_DIST/uploads"
+            log_success "已将 uploads 目录权限设置为 777"
+        fi
 
         # 检查 Nginx 是否运行
         if ! systemctl is-active --quiet nginx; then
@@ -1446,9 +1474,11 @@ DB_FILE="$DB_FILE"
 
 # 创建备份目录
 mkdir -p \$BACKUP_DIR
+chmod -R 777 \$BACKUP_DIR
 
 # 备份数据库
 cp \$DB_FILE "\$BACKUP_DIR/database_\$TIMESTAMP.db"
+chmod 666 "\$BACKUP_DIR/database_\$TIMESTAMP.db"
 
 # 保留最近 30 个备份
 ls -t \$BACKUP_DIR/database_*.db | tail -n +31 | xargs rm -f
@@ -1608,15 +1638,17 @@ clone_repository() {
         exit 1
     fi
 
-    # 设置项目目录权限
+    # 设置项目目录权限，使用 root 权限确保一致性
     log_info "设置项目目录权限..."
     chmod -R 755 "$PROJECT_NAME"
+    chown -R root:root "$PROJECT_NAME"
+    log_success "已将项目所有者设置为 root:root"
 
-    # 如果有 www-data 用户，则设置为所有者
-    if getent group www-data &>/dev/null; then
-        log_info "设置项目所有者为 www-data..."
-        chown -R www-data:www-data "$PROJECT_NAME"
-    fi
+    # 对需要写入的目录设置更宽松的权限
+    log_info "设置数据目录权限..."
+    mkdir -p "$PROJECT_NAME/backend/data" "$PROJECT_NAME/backend/logs" "$PROJECT_NAME/backend/uploads"
+    chmod -R 777 "$PROJECT_NAME/backend/data" "$PROJECT_NAME/backend/logs" "$PROJECT_NAME/backend/uploads"
+    log_success "已将数据目录权限设置为 777"
 
     log_success "仓库克隆成功"
 

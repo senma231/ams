@@ -9,7 +9,6 @@
     "init-db": "node scripts/init-db.js"
   },
   "dependencies": {
-    "asset-management-backend": "file:",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
