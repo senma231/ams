@@ -4,6 +4,7 @@
     <div v-else class="loading-container">
       <el-loading :fullscreen="true" />
     </div>
+    <NotificationCenter v-if="isReady && userStore.isLoggedIn" />
   </el-config-provider>
 </template>
 
@@ -13,6 +14,7 @@ import { ElConfigProvider, ElLoading } from 'element-plus';
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs';
 import { useUserStore } from './stores/user';
 import { useRouter } from 'vue-router';
+import NotificationCenter from '@/components/NotificationCenter.vue';
 
 const userStore = useUserStore();
 const router = useRouter();
@@ -22,7 +24,7 @@ onMounted(async () => {
   try {
     // 从 localStorage 恢复用户状态
     const token = localStorage.getItem('token');
-    
+
     if (token) {
       userStore.setToken(token);
       try {
@@ -79,4 +81,4 @@ body {
   justify-content: center;
   align-items: center;
 }
-</style> 
+</style>

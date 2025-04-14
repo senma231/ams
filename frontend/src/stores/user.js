@@ -47,7 +47,7 @@ export const useUserStore = defineStore('user', {
           username,
           password
         });
-        
+
         if (response.data.success) {
           const { token, user } = response.data.data;
           this.setToken(token);
@@ -68,15 +68,15 @@ export const useUserStore = defineStore('user', {
 
       // 2. 清除 axios 认证头
       delete axios.defaults.headers.common['Authorization'];
-      
+
       // 3. 清除本地存储
       localStorage.clear();
       sessionStorage.clear();
-      
+
       // 4. 强制跳转到登录页面并刷新整个应用
       const baseUrl = window.location.origin;
       window.location.href = `${baseUrl}/login`;
-      
+
       // 5. 阻止后续操作
       throw new Error('Unauthorized');
     },
@@ -153,16 +153,19 @@ export const useUserStore = defineStore('user', {
     },
 
     // 删除用户
-    async deleteUser(userId) {
+    async deleteUser(username) {
       this.loading = true;
       try {
-        await axios.delete(`/api/users/${userId}`);
+        const response = await axios.delete(`/api/users/${username}`);
         await this.fetchUsers();
         return { success: true };
       } catch (error) {
         this.error = '删除用户失败';
         console.error('删除用户错误:', error);
-        return { success: false, error: error.response?.data?.message || '删除用户失败' };
+        return {
+          success: false,
+          error: error.response?.data?.message || error.message || '删除用户失败'
+        };
       } finally {
         this.loading = false;
       }
@@ -192,4 +195,4 @@ export const useUserStore = defineStore('user', {
       }
     }
   }
-}); 
+});

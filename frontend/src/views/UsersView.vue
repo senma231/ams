@@ -155,6 +155,7 @@ import { Plus } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { formatDate } from '@/utils/date';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 
 const userStore = useUserStore();
 const loading = computed(() => userStore.loading);
@@ -274,15 +275,17 @@ const handleDelete = async (row) => {
         type: 'warning'
       }
     );
-    const result = await userStore.deleteUser(row.id);
-    if (result.success) {
+    // 直接使用用户名调用 API
+    const response = await axios.delete(`/api/users/${row.username}`);
+    if (response.data.success) {
       ElMessage.success('删除成功');
+      await userStore.fetchUsers(); // 刷新用户列表
     } else {
-      ElMessage.error(result.error);
+      ElMessage.error(response.data.message || '删除失败');
     }
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败');
+      ElMessage.error(error.response?.data?.message || '删除失败');
     }
   }
 };
@@ -290,7 +293,7 @@ const handleDelete = async (row) => {
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return;
-  
+
   await formRef.value.validate(async (valid) => {
     if (valid) {
       const result = formType.value === 'add'
@@ -320,14 +323,14 @@ const handleResetPassword = (row) => {
 // 提交重置密码
 const handleResetPasswordSubmit = async () => {
   if (!resetPasswordFormRef.value) return;
-  
+
   try {
     await resetPasswordFormRef.value.validate();
-    
+
     const result = await userStore.updateUser(resetPasswordForm.value.username, {
       password: resetPasswordForm.value.password
     });
-    
+
     if (result.success) {
       ElMessage.success('密码重置成功');
       resetPasswordDialogVisible.value = false;
@@ -366,4 +369,4 @@ const handleResetPasswordSubmit = async () => {
   justify-content: flex-end;
   gap: 10px;
 }
-</style> 
+</style>
